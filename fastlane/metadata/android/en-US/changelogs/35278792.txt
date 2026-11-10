@@ -1,0 +1,17 @@
+🎵 Rhythm v3.5 Stable - Feature Update
+
+✨ New Features:
+• Gesture Settings: Control Gesture usage on Mini Player & Full Player
+• Progress Customization: Customize Progress for Mini Player & Full Player
+• Rhythm Stats: Added a dedicated stat screen expanding existing Stat Widget
+
+🎨 Improvements:
+• Many mixed UI improvements
+
+🐛 Bug Fixes:
+• Song/Album/Artist names should now Auto Scroll instead of overflowing
+
+⚡ Performance:
+• Many under-the-hood optimizations for smoother experience
+
+Thank you for using Rhythm! Report issues on GitHub.

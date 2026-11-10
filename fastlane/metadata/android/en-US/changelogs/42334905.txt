@@ -1,0 +1,16 @@
+Rhythm v4.2 - Maintenance Update 
+
+✨ Fixes:
+• Queue: Reliable Queue operations across multiple screens
+• Splash: Avoids restarting with splash screen unnecessarily
+• Library: Songs Tab now remembers the scroll position
+• Metadata Editor: Now metadata changes are saved across screens
+
+🎨 Improvements:
+• Library: Added ability to shuffle whole albums
+• Media Scanner: Now it does a full scan instead of incremental scans
+• Many more Crash Fixes, UI & Performance Improvements
+
+Thanks for using Rhythm ;)
+
+

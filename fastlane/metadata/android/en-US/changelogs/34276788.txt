@@ -1,0 +1,14 @@
+🎵 Rhythm v3.4 - Maintenance Update
+
+New:
+• Player Settings
+• Artist Settings
+
+Fixed:
+• Playlist songs now maintains the original order and allows proper progress
+
+Improved:
+• UI, Theme & Performance improvements
+
+
+

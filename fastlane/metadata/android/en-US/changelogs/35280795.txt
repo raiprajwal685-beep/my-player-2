@@ -1,0 +1,15 @@
+🎵 Rhythm v3.5 Stable - Maintenance Update
+
+✨ New Features:
+• AutoEQ: Added Presets for 61 Devices
+
+🎨 Improvements:
+• Equalizer now supports 10 Bands
+• Rhythm Stats
+• Many more UI & Performance improvements
+
+🐛 Bug Fixes:
+• Fixed the issue where when toggling shuffle on/off during playback, the songs would play in the shuffled order, but the queue list shown in the UI was not updated.
+• Fixed an issue where the Rhythm Stats widget was not following the Stats from Service.
+
+Thank you for using Rhythm! Report issues on GitHub.

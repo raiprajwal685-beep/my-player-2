@@ -1,0 +1,15 @@
+Rhythm v4.5 - Feature Update 
+
+✨ Fixes:
+• Queue: Reliable Queue operations across multiple screens
+• Player: Handled many more Shuffle edge cases
+
+🎨 Improvements:
+• Tour: Simplified steps
+• Backup & Restore: Now you can chose what to backup and restore
+• Rhythm Guard: New system that helps your listening habits in check
+• Settings: Suggestions & many new settings are added
+• Many more Crash Fixes, UI & Performance Improvements 
+
+Thanks for using Rhythm ;)
+

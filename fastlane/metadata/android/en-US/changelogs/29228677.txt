@@ -1,0 +1,25 @@
+🎵 Rhythm v2.9.228.677 Stable - Feature Update
+
+✨ New Features:
+• Lyrics Editor: Edit and view time-synced lyrics directly in the player
+• Play Next: Queue songs to play next from library song menu
+• Tab Reorder: Direct access to reorder library tabs (no more diving into settings)
+
+🎨 Improvements:
+• Enhanced song item three-dot menu in player with better organization
+• Added project website and repository information in About section
+• Optimized artist tab with lazy loading for better performance
+• Persistent sort order - your songs tab sorting preference is now remembered across app restarts
+
+🐛 Bug Fixes:
+• Fixed external storage contents not showing up in folder explorer
+• Fixed blacklisted tracks appearing in playlists
+• Fixed lazy loading issues on Artist tab
+• Cleaned up unused system permissions for better privacy
+
+⚡ Performance:
+• Many under-the-hood optimizations for smoother experience
+• Improved memory management and battery efficiency
+• Better handling of large music libraries
+
+Thank you for using Rhythm! Report issues on GitHub.

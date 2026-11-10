@@ -1,0 +1,15 @@
+Rhythm v4.4 - Feature Update 
+
+✨ Added:
+• Lyrics: Ability to Auto Resume when connecting audio devices
+• Player: Pitch & Speed Sync
+
+🎨 Improvements:
+• Library: Improved Performance (Implemented Room)
+• Player: Improved Shuffle Persistence
+• Media Scanner: Implemented Fixes for Android 8, 8.1, 9 & 10
+• Many more Crash Fixes, UI & Performance Improvements
+
+Thanks for using Rhythm ;)
+
+

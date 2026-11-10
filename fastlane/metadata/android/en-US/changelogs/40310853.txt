@@ -1,0 +1,6 @@
+🎵 Rhythm v4.0 Stable - EOL Update
+
+🎨 Changes:
+• Updates and APIs are now disabled by default to align with F-Droid's Regulations
+
+Thank you for using Rhythm! Report issues on GitHub.

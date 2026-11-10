@@ -1,0 +1,15 @@
+Rhythm v3.8 Holiday Update 🎄
+
+✨ Fixes:
+• Equalizer: Fixed "Open System Equalizer" action
+
+🎨 Improvements:
+• UI: Addressed Song Info, Albums, Edit Metadata, External Player Overflows
+• PLaylist: New floating bottom bar which now has Search and Add Songs buttons
+• Player: Improved Wave and other Progress styles
+• Many more UI & Performance improvements
+
+🎉 As we bid adieu to 2025 and welcome 2026, thank you for being the beat in our Rhythm! 
+From playlist heroes to equalizer wizards, we've packed in features that'll make your holidays merry and bright!
+
+

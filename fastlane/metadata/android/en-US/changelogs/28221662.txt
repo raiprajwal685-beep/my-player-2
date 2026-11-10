@@ -1,0 +1,34 @@
+Rhythm Stable - Major Feature Update
+
+What's New:
+
+Added: Equalizer (Player)
+Added: Sleep Timer (Player)
+Added: New Media Scan Whitelisting Mode (Settings)
+Added: Ability to Import/Export Playlists (Library)
+Added: Explorer (Library)
+Added: Ability to search settings (Settings)
+Added: Ability to re-order tabs (Settings)
+Added: Theme Customization (Settings)
+Added: Color Theme based on Track Art (Settings)
+Added: System Fonts & ability to import Fonts (Settings)
+Added: Ability to tap on lyrics to seek and manual reload on failure (Player)
+Added: Play All & Shuffle (Library)
+Improved: Backup & Restore (Settings)
+Improved: Updated licensing information (About)
+Improved: Playlist item view (Library)
+Improved: Bottom Navigation Bar (RhythmNavigation)
+Improved: Library now remembers your last active tab (Library)
+Improved: Hide bottom actions by default (Player)
+Improved: Polished UI (System)
+Improved: Onboarding Experience (Onboarding)
+Improved: Optimized startup speed (Splash)
+Improved: Accessibility on Bottomsheets (System)
+Fixed: Miniplayer positioning (Miniplayer)
+Fixed: ANR when app is idle or not playing music (MediaPlaybackService)
+Fixed: Lyrics View getting reset after every track change (Player)
+Fixed: Playback crash on Android 16 (System Crash)
+Fixed: Issues when updating using Updater (AppUpdater)
+Fixed: Reinstalling Rhythm skips On-Boarding and Media Scanning after launching (System)
+Lots of miscellaneous changes..
+Many more optimizations & improvements...

@@ -1,0 +1,32 @@
+name: Build My Player APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+          cache: gradle
+      - name: Add swap space
+        run: |
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+      - name: Build debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleGithubDebug --no-daemon --stacktrace -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=768m" -Dorg.gradle.workers.max=2 -Dorg.gradle.parallel=false -Pkotlin.compiler.execution.strategy=in-process
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: my-player-debug-apk
+          path: app/build/outputs/apk/github/debug/*.apk
+          retention-days: 30

@@ -1,0 +1,18 @@
+Rhythm v4.3 - Feature Update 
+
+✨ Added:
+• Lyrics: Ability to Embed Lyrics to tracks
+• Lyrics: Ability to Keep Screen Awake when Lyrics View is active
+• Player: Pitch Control
+• Home: Ability to Hide Greeting from Home
+• System: Ability to show Lossless Artwork
+
+
+🎨 Improvements:
+• Library: Improved Artist Handling
+• Media Scanner: Implemented Fixes for Android 8, 8.1 & 9
+• Many more Crash Fixes, UI & Performance Improvements
+
+Thanks for using Rhythm ;)
+
+

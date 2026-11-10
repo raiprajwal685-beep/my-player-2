@@ -1,0 +1,12 @@
+Rhythm v4.0 - EOL Update 
+
+✨ Fixes:
+• Rhythm Stats: Now displays the actual listening time
+
+🎨 Improvements:
+• Player: Added ability to remember queue when you exit Rhythm
+• Many more UI & Performance improvements
+
+Thanks for using Rhythm ;)
+
+

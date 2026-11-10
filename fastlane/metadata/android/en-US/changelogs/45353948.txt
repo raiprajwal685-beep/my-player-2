@@ -1,0 +1,10 @@
+Rhythm v4.5 - Maintnence Update
+
+Improvements:
+* Queue & Shuffle 
+* Rhythm Guard is more reliable now
+* UI Improvements across screens and UI elements
+* Many more Crash fixes, improvements and bug fixes
+
+Thanks for using Rhythm ;)
+

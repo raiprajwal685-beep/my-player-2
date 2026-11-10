@@ -1,0 +1,11 @@
+🎵 Rhythm v3.2 - Maintenance Update
+
+New: 
+• Playlist Action Dialog for smart playlist playback 
+• Queue Action Dialog with Surface-based option UI 
+• Active song highlighting
+• Playlist detail screen with smart playback options
+
+Improved:
+• Surface-based selection UI for all action dialogs 
+

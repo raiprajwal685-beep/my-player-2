@@ -1,0 +1,13 @@
+🎵 Rhythm v4.0.309.851 Stable - Maintenance Update
+
+✨ New Features:
+• Tablet UI for Playlist Screens 
+• Library will now indicate background processing
+
+🎨 Improvements:
+• Responsiveness in elements across multiple screens
+
+🐛 Bug Fixes:
+• Resolved alignment issues in Player due to poor responsiveness handling
+
+Thank you for using Rhythm! Report issues on GitHub.

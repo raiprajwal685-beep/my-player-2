@@ -1,0 +1,16 @@
+🎵 Rhythm v3.7 Stable - Maintenance Update
+
+✨ New Features:
+• Playlist Screen: Added ability to reorder, sort, multi remove songs
+• Settings Screen: Added ability to turn on/off Default Playlists
+• Settings Screen: Added ability to stop playback when app is removed from RAM
+• Auto-EQ: Device Preset detection
+
+🎨 Improvements:
+• Equalizer: Fixed 10 Band Equalizer & Improved its UI
+• On-Boarding: Fixed UI overflow
+• Library: Fixed issues regarding tab re-ordering
+• Player: Seek & Playback
+• Translation
+
+Thank you for using Rhythm! Report issues on GitHub.

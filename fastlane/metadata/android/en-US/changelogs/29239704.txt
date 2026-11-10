@@ -1,0 +1,11 @@
+🎵 Rhythm - Bug Fix Update
+
+🎨 Improvements:
+• Embedded lyrics extraction logic
+• Festive Themes
+
+🐛 Bug Fixes:
+• Metadata retrieval
+• Many more..
+
+Happy Diwali & Thank you for using Rhythm! 🎵

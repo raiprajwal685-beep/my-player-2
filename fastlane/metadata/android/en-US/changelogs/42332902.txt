@@ -1,0 +1,14 @@
+Rhythm v4.2 - Maintenance Update 
+
+✨ Fixes:
+• Queue: Fixed Queue operations across multiple screens
+• Playlist: Added sort persistence
+
+🎨 Improvements:
+• Player: Added ability to decode EAC3-JOC formats
+• System: Faster loading time
+• Many more UI & Performance improvements
+
+Thanks for using Rhythm ;)
+
+

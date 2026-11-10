@@ -1,0 +1,16 @@
+🎵 Rhythm - Bug Fix Update
+
+✨ New Features:
+• Queue & Shuffle Settings: Auto-add to queue, clear queue behavior
+• Enhanced Explorer: Create Playlist from folder songs
+• Festive Themes: Diwali theme with vibrant colors and particles
+
+🎨 Improvements:
+• Explorer Loading States: Unified loading indicators
+• Folder Visibility: Nested folders with audio tracks visible
+
+🐛 Bug Fixes:
+• Fixed lag and double playback with shuffle/play all
+• Re-implemented explorer for faster loading
+
+Thank you for using Rhythm! 🎵

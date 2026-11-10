@@ -1,0 +1,170 @@
+name: Bug Report
+description: Report a bug or issue you encountered in Rhythm
+title: "[BUG]: "
+labels: ["bug"]
+assignees: ["cromaguy"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Thank you for taking the time to report a bug!
+        To help us resolve the issue as quickly as possible, please fill out this form in detail. **Issues lacking essential details or steps to reproduce may be closed.**
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: Provide a clear and concise description of what the bug is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Explain the steps required to trigger the bug.
+      placeholder: |
+        1. Open Settings -> Audio & Effects -> Lyrics and enable ...
+        2. Go to the Player Screen
+        3. Play a local track with format ...
+        4. See error/unexpected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected vs Actual Behavior
+      description: What did you expect to happen, and what happened instead?
+      placeholder: |
+        Expected: ...
+        Actual: ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category / Component
+      description: Which area of the app is affected by this bug?
+      options:
+        - Local Playback (Engine)
+        - Go Mode Streaming (Subsonic / Navidrome / Jellyfin)
+        - Online Integrations & Fallbacks (Better Lyrics / Deezer / Lyrically / YouTube Music)
+        - Lyrics (Synced, Word-by-Word, Translations)
+        - Audio Effects (Replay Gain / Equalizer / Speed & Pitch)
+        - User Interface & Themes (Aesthetics)
+        - Bluetooth & Widgets (AVRCP, Glance widgets, Notification controls)
+        - Library, Queue, & Playlists
+        - Backup & Restore
+        - Crash, Freeze, or ANR
+        - Build, Gradle, or Compilation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: audio_format
+    attributes:
+      label: Audio Format (Local Playback only)
+      description: If this issue involves local playback, what is the file format?
+      options:
+        - N/A
+        - FLAC
+        - MP3
+        - M4A (AAC / ALAC)
+        - OGG (Vorbis / Opus)
+        - OPUS / OPA
+        - MKA (Matroska audio)
+        - MP4 / MKV (video containers)
+        - WAV
+        - WMA / AAC / APE
+        - Other (e.g. TAK, TTA, AIFF)
+
+  - type: dropdown
+    id: lyrics_source
+    attributes:
+      label: Lyrics Source (Lyrics issues only)
+      description: If this issue involves lyrics, where are the lyrics loaded from?
+      options:
+        - N/A
+        - Local .lrc file (same folder as audio)
+        - Embedded Tags (metadata)
+        - Online API (LrcLib)
+        - Online API (Lyrically)
+        - Online API (BetterLyrics)
+        - Plain Text Lyrics
+
+  - type: checkboxes
+    id: settings
+    attributes:
+      label: Relevant App Settings
+      description: Select any settings currently active on your app that relate to the issue.
+      options:
+        - label: Auto Word Sync (Formatting and Behaviors)
+        - label: Bluetooth Lyrics (Broadcaster / AVRCP)
+        - label: Persist Shuffle Mode
+        - label: Persist Queue
+        - label: Lossless Artwork
+        - label: Replay Gain enabled
+        - label: Auto EQ enabled
+        - label: Pitch or Speed modification active
+        - label: Custom Artist Separators enabled
+
+  - type: input
+    id: app_version
+    attributes:
+      label: App Version
+      placeholder: "e.g., 5.4.456.1196 Beta (look in Settings -> Updates & Info -> About)"
+    validations:
+      required: true
+
+  - type: input
+    id: android_version
+    attributes:
+      label: Android Version
+      placeholder: "e.g., Android 14 (API 34)"
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Device Model
+      placeholder: "e.g., Samsung Galaxy S23 Ultra, Oppo A6, Emulator"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Installation Source
+      options:
+        - GitHub Releases
+        - F-Droid
+        - IzzyOnDroid
+        - Manual Build (Source Code)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Stack Traces
+      description: |
+        If the app crashed, please paste the logs here. 
+        Note: Rhythm shows a Crash Screen with log output and saves crash logs to the `Rhythm/Crashes` directory on your device.
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other information or device details that might help explain the issue.
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / Screen Recording
+      description: Drag and drop screenshots or screen recordings showing the issue.

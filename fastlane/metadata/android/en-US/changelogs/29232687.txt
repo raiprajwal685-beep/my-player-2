@@ -1,0 +1,14 @@
+🎵 Rhythm v2.9.232.687 - BugFix Update
+
+✨ New Features:
+• Embedded Lyrics: Extract lyrics from audio file metadata
+• Lyrics Source Priority: Choose API, embedded, or local .lrc files with automatic fallback
+• Enhanced M3U Import: Support all playlist formats, even without #EXTINF metadata
+
+🎨 Improvements:
+• Media Scan: Fixed empty library issues with loading states and error guidance
+• Splash Screen: Resolved spacing inconsistencies across screen sizes
+
+🐛 Bug Fixes:
+• Lyrics Race Conditions: Fixed wrong lyrics display when switching songs rapidly
+• Cache Key Issues: Improved lyrics caching to prevent wrong lyrics for similar songs

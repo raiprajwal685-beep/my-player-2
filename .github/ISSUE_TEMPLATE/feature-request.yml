@@ -1,0 +1,76 @@
+name: Feature Request
+description: Propose a new feature, enhancement, or request an improvement in Rhythm
+title: "[FEATURE]: "
+labels: ["feature request"]
+assignees: ["cromaguy"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Feature Summary
+      description: A brief and clear description of the feature or enhancement you would like to see.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Feature Area / Category
+      description: Which part of Rhythm does this feature request relate to?
+      options:
+        - Playback Engine & Formats
+        - User Interface & Themes (Aesthetics)
+        - Lyrics View & Timing Sync
+        - Online Streaming & Search
+        - Library, Queue, & Playlists
+        - Bluetooth, Media Sessions, & Widgets
+        - Performance & Caching
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Problem / Use Case
+      description: What problem does this feature solve? Describe the use case or scenarios where this would be useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Explain how you would like this feature to work and what the user experience should be like.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: complexity
+    attributes:
+      label: Estimated Complexity
+      description: Based on your understanding, how complex would this feature be to design and implement?
+      options:
+        - Low (Simple logic or minor UI tweak)
+        - Medium (Requires new components or moderate logic changes)
+        - High (Requires major architectural changes or complex APIs)
+        - Not sure
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative Solutions
+      description: Describe any alternative designs, configurations, or workarounds you've considered.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Add any other screenshots, mockups, or context that might help visualize the request.
+
+  - type: textarea
+    id: implementation_notes
+    attributes:
+      label: Implementation Notes
+      description: If you have thoughts on how this could be implemented (e.g. library choices, API endpoints), feel free to share.
+      render: markdown

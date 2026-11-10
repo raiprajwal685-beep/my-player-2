@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?><!-- made by Jyotiraditya Panda, GPL-3.0-or-later licensed -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:tint="?attr/colorControlNormal"
+    android:viewportWidth="960"
+    android:viewportHeight="960">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M120,120h720c44,0,80,36,80,80v560c0,44-36,80-80,80H120c-44,0-80-36-80-80V200c0-44,36-80,80-80zM836,554c-6-14-22-24-32-32-4-4-38-34-10-44,0,0,14-2,22-2h20l4-16s-42-12-100-12c-24,0-122,14-122,56,0,32,64,62,66,64,4,4,10,10,10,16s-8,18-28,18c-4,0-10,0-16-2-14-2-30-10-30-10s-14,6-20,8h-8c-6,0-8,0-12-4V490h40v-40h-40V350l-140,56v44h-40V330H280v128c-14-4-34-6-50-6-64-2-110,40-110,92,0,58,46,86,110,86,16,0,32-2,46-6v6h124V490h40v104s10,36,92,36c0,0,34-2,72-10,2,0,8-2,18-2h4c12,0,28,6,30,6,12,2,24,4,56,6h10c24,0,46-4,52-4,32-6,78-36,62-72zM280,594c-22-4-40-26-40-50s18-46,40-50v100z" />
+</vector>

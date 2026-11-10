@@ -1,0 +1,18 @@
+🎵 Rhythm v3.3 - Maintenance Update
+
+New:
+• New External Player
+• Carousel styles & added ability to Reorder Sections
+• Home & Time formatting settings
+• New Festive Theme Engine
+
+Fixed:
+• Crash due to the NullPointerException which was caused by null values from the MediaStore cursor
+• Missing Callbacks of Artist and Album Bottomsheets from Home Screen & Search Screen
+• Metadata Editor
+
+Improved:
+• UI, Theme & Performance improvements
+
+
+

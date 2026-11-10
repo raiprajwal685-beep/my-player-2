@@ -1,0 +1,7 @@
+Rhythm v4.4 - Maintenance Update 
+
+🎨 Improvements:
+• System: Improved Performance 
+• Many more Crash Fixes, UI & Performance Improvements
+
+Thanks for using Rhythm ;)

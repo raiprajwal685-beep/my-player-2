@@ -1,0 +1,13 @@
+Rhythm v4.7 - Maintenance Update 
+
+✨ Improvements & Additions: 
+• Lyrics: Parser improvements for Translation Lyrics
+• General: Prefer MediaCodec on Dolby EAC3 devices
+• Rhythm Guard: Add speaker-output toggle 
+
+🎨 Fixes: 
+• MediaScan: Mojibake detection and repair
+• Cache: Implement embedded album artwork cache and retrieval
+• UI: Fixed Search Bar on Search Screen to be bottom docked
+
+Thank you for using Rhythm! Report issues on GitHub.

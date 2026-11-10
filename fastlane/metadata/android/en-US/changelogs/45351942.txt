@@ -1,0 +1,16 @@
+Rhythm v4.5 - Hotfix Update
+
+Fixes:
+* Multi-genre support.
+* Metadata editing reliability improvements.
+* Embedded lyrics parser fixes.
+* Multi-disc album recognition fixed.
+* Home screen Add to Favorites action fixed.
+* Sleep timer behavior in Settings fixed.
+
+Improvements:
+* Artist management improvements.
+* USB routing is now requested only on supported Android 14+ devices and supported USB DACs.
+
+Thanks for using Rhythm.
+

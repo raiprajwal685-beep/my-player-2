@@ -1,0 +1,12 @@
+Rhythm v5.5 - Update
+
+• Real-time audio playback quality & output pipeline telemetry
+• Native & external audio capability inspector screens
+• 50k Subsonic library sync with resumable checkpoints
+• Smooth queue & playlist drag-and-drop reordering
+• Option to keep quality badges visible on player
+• Fixed Date Added resetting for moved files (#661)
+• Starred Subsonic tracks now sync to Liked Songs
+• Crossfade and audio routing stability fixes
+
+Thanks for using Rhythm ;)

@@ -1,0 +1,9 @@
+🎵 Rhythm v3.1 Stable - Major Update
+
+New: Multilanguage support • 9 widget layouts • Queue action dialog • Genre browsing • Playlist grid view • Word-level lyrics • Lyrics sync adjust • Player customization • Settings search • Quick tips • Swipe navigation
+
+Improved: New Tuner Settings UI • Enhanced widgets • Better equalizer • Faster loading • Genre caching • Queue management • Theme customization
+
+Fixed: Canvas API • LazyColumn crashes • Queue duplicates • Most Played filtering • Screen transitions • Album Artist grouping
+
+Issues: Metadata editor (memory only) • Translations in progress

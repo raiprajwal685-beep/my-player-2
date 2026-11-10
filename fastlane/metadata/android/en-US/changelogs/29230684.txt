@@ -1,0 +1,16 @@
+🎵 Rhythm v2.9.230.684 - Maintenance
+
+✨ New Features:
+• Audio Quality Badges: Dolby, DTS, Lossless, Hi-Res detection
+• Word-By-Word Lyrics: Synchronized lyrics display
+• Loading States: Visual feedback for Play All/Shuffle
+
+🎨 Improvements:
+• Enhanced ExoPlayer buffering for lossless files
+• Better codec detection with MediaExtractor API
+
+🐛 Bug Fixes:
+• Fixed Auto Backup
+• Fixed AAC/ALAC detection in M4A containers
+
+Thank you for using Rhythm!

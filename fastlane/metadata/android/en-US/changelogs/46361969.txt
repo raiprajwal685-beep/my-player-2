@@ -1,0 +1,12 @@
+Rhythm v4.6 - Maintenance Update 
+
+✨ Improvements & Additions: 
+• Playback: Added Bluetooth Lyrics Mode (Experimental)
+• General: Optimized External Player
+
+🎨 Fixes: 
+• Library: Fixed Artist Delimiters
+• Core: Fixed crashes when app is in background and other general crash fixes
+• UI: Fixed ANR on Artist Screen
+
+Thank you for using Rhythm! Report issues on GitHub.

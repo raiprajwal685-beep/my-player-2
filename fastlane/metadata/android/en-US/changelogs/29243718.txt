@@ -1,0 +1,12 @@
+🎵 Rhythm v2.9.243.718 Stable - EOL Update
+
+✨ New Features:
+• Added Quick Playback Settings
+
+🎨 Improvements:
+• Quality Detection and Filters
+
+🐛 Bug Fixes:
+• Fixed Device Switcher
+
+Thank you for using Rhythm! Report issues on GitHub.

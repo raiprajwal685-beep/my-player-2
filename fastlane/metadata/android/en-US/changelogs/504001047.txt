@@ -1,8 +1,0 @@
-Rhythm v5.0 - Maintenance Update
-
-• Fixed lyrics parsing and display issues.
-• Added Experimental Replay Gain support.
-• Full Screen Lyrics view improvements.
-• Many more Crash Fixes, UI & Performance Improvements
-
-Thanks for using Rhythm ;)

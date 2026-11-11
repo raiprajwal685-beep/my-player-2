@@ -1,9 +1,0 @@
-Rhythm 5 - Anniversary Update
-
-- Go Mode: Streaming dedicated providers, library and UI.
-- Full-Screen Lyrics: Immersive new viewing mode.
-- Material Symbols: Modern UI migration.
-- Audio: Crossfade on skip.
-- Performance: Optimized library sync and eliminated lag.
-- Widgets: Improved Glance Launcher Widget stability and responsiveness.
-- General: Many fixes, addressed navigation issues, and improved UI.

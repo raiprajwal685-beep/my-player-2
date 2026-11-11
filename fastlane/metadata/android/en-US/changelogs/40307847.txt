@@ -1,4 +1,0 @@
-✨ New: Rating system, settings search, improved onboarding
-🎨 Better: AutoEQ detection, UI polish, tablet support
-🐛 Fixed: Crashes, memory leaks, UI glitches
-⚡ Enhanced: Permission checks for Android 9-16

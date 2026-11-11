@@ -1,8 +1,0 @@
-Rhythm v5.0 - Maintenance Update
-
-• Fixed lyrics parsing and display issues.
-• Added 9 more language support.
-• Media scan improvements.
-• Many more Crash Fixes, UI & Performance Improvements
-
-Thanks for using Rhythm ;)

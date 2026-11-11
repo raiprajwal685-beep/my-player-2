@@ -381,7 +381,6 @@ fun AboutScreen(
                     name = "Anjishnu Nandi",
                     githubUsername = "cromaguy",
                     avatarUrl = "https://github.com/cromaguy.png",
-                    supportUrl = "https://ko-fi.com/anjishnunandi",
                     teamTitle = context.getString(R.string.settings_about_team_chromahub),
                     teamDescription = context.getString(R.string.settings_about_team_desc),
                     openUrl = openUrl
@@ -583,7 +582,6 @@ fun DeveloperCard(
     name: String,
     githubUsername: String,
     avatarUrl: String,
-    supportUrl: String,
     teamTitle: String,
     teamDescription: String,
     openUrl: (String) -> Unit
@@ -683,33 +681,6 @@ fun DeveloperCard(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Button(
-                    onClick = {
-                        HapticUtils.performHapticFeedback(context, haptics, HapticType.HEAVY)
-                        openUrl(supportUrl)
-                    },
-                    shape = ExpressiveShapes.Full,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(vertical = 12.dp)
-                ) {
-                    Icon(
-                        imageVector = MaterialSymbolIcon("local_cafe", filled = true),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = stringResource(R.string.aboutscreen_support_development),
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                }
             }
         }
 

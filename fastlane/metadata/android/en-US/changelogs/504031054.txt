@@ -1,9 +1,0 @@
-Rhythm v5.0 - Maintenance Update
-
-• Fixed crashes on opening Albums.
-• Many more Crash Fixes, UI & Performance Improvements.
-
-Note: IzzyOnDroid users are switched to F-Droid builds, so APIs are disabled by default which was responsible for fetching Artworks & Lyrics. 
-You can enable them in Settings > Integrations.
-
-Thanks for using Rhythm ;)

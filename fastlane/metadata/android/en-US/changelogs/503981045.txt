@@ -1,7 +1,0 @@
-Rhythm 5 - Maintenance Update
-
-- Fixed crashes.
-- Improved Haptics.
-- Material Symbols: Modern UI migration.
-- Full Screen Lyrics view improvements.
-- Added Drag & Drop support to multiple places replacing arrows.

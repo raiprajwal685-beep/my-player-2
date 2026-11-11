@@ -1,0 +1,1058 @@
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index 925f027..97c04d1 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -17,6 +17,7 @@
+     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+     <uses-permission android:name="android.permission.WAKE_LOCK" />
+     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
++    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+     
+     <!-- Bluetooth permissions -->
+     <uses-permission android:name="android.permission.BLUETOOTH" />
+diff --git a/app/src/main/java/chromahub/rhythm/app/RhythmApplication.kt b/app/src/main/java/chromahub/rhythm/app/RhythmApplication.kt
+index 471ded4..56838c2 100644
+--- a/app/src/main/java/chromahub/rhythm/app/RhythmApplication.kt
++++ b/app/src/main/java/chromahub/rhythm/app/RhythmApplication.kt
+@@ -56,7 +56,22 @@ class RhythmApplication : Application(), ImageLoaderFactory {
+         super.onCreate()
+         
+         instance = this
+-        
++
++        // Track whether any of our screens is visible (floating lyrics hides while the app is open)
++        registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
++            override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
++            override fun onActivityStarted(activity: android.app.Activity) {
++                chromahub.rhythm.app.infrastructure.service.AppVisibility.onActivityStarted()
++            }
++            override fun onActivityResumed(activity: android.app.Activity) {}
++            override fun onActivityPaused(activity: android.app.Activity) {}
++            override fun onActivityStopped(activity: android.app.Activity) {
++                chromahub.rhythm.app.infrastructure.service.AppVisibility.onActivityStopped()
++            }
++            override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) {}
++            override fun onActivityDestroyed(activity: android.app.Activity) {}
++        })
++
+         Log.d(TAG, "═══════════════════════════════════════════════════")
+         Log.d(TAG, "RhythmApplication onCreate")
+         Log.d(TAG, "Build Type: ${BuildConfig.BUILD_TYPE}")
+diff --git a/app/src/main/java/chromahub/rhythm/app/activities/MainActivity.kt b/app/src/main/java/chromahub/rhythm/app/activities/MainActivity.kt
+index c2a1db3..3f25fbc 100644
+--- a/app/src/main/java/chromahub/rhythm/app/activities/MainActivity.kt
++++ b/app/src/main/java/chromahub/rhythm/app/activities/MainActivity.kt
+@@ -1201,6 +1201,14 @@ class MainActivity : AppCompatActivity() {
+         Log.d(TAG, "MainActivity onResume: refreshing audio devices")
+         musicViewModel.refreshAudioDevices()
+         maybeRequestBatteryOptimizationExemption()
++
++        // Came back from the "Display over other apps" screen after tapping the floating lyrics
++        // toggle: switch the feature on now if the permission was granted.
++        val floatingPrefs = getSharedPreferences("floating_lyrics", MODE_PRIVATE)
++        if (floatingPrefs.getBoolean("pending_enable", false)) {
++            floatingPrefs.edit().remove("pending_enable").apply()
++            if (Settings.canDrawOverlays(this)) appSettings.setFloatingLyricsEnabled(true)
++        }
+     }
+ 
+     override fun onWindowFocusChanged(hasFocus: Boolean) {
+diff --git a/app/src/main/java/chromahub/rhythm/app/features/local/presentation/viewmodel/MusicViewModel.kt b/app/src/main/java/chromahub/rhythm/app/features/local/presentation/viewmodel/MusicViewModel.kt
+index df245a0..f9ef897 100644
+--- a/app/src/main/java/chromahub/rhythm/app/features/local/presentation/viewmodel/MusicViewModel.kt
++++ b/app/src/main/java/chromahub/rhythm/app/features/local/presentation/viewmodel/MusicViewModel.kt
+@@ -4620,7 +4620,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
+         val currentLyricsVal = _currentLyrics.value
+         
+         // Track raw lyrics key (synced or plain) to send updates to service
+-        val rawLyricsKey = currentLyricsVal?.syncedLyrics ?: currentLyricsVal?.plainLyrics ?: ""
++        val rawLyricsKey = (currentLyricsVal?.syncedLyrics ?: currentLyricsVal?.plainLyrics ?: "") +
++            (currentLyricsVal?.wordByWordLyrics?.let { "|wbw" + it.hashCode() } ?: "")
+         if (cachedSyncedLyricsRaw != rawLyricsKey) {
+             cachedSyncedLyricsRaw = rawLyricsKey
+             val synced = currentLyricsVal?.syncedLyrics
+@@ -4639,6 +4640,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
+                     putStringArrayList("lyric_translations", ArrayList(cachedParsedSyncedLyrics.map { it.translation ?: "" }))
+                     putStringArrayList("lyric_romanizations", ArrayList(cachedParsedSyncedLyrics.map { it.romanization ?: "" }))
+                     putLongArray("lyric_timestamps", cachedParsedSyncedLyrics.map { it.timestamp }.toLongArray())
++                    // Word-by-word JSON (if the song has it) so the floating lyrics window can do karaoke fill
++                    putString("lyric_wbw_json", currentLyricsVal?.wordByWordLyrics ?: "")
+                     val plain = currentLyricsVal?.plainLyrics
+                     if (plain != null) {
+                         putString("plain_lyrics", plain)
+diff --git a/app/src/main/java/chromahub/rhythm/app/infrastructure/service/FloatingLyricsOverlay.kt b/app/src/main/java/chromahub/rhythm/app/infrastructure/service/FloatingLyricsOverlay.kt
+new file mode 100644
+index 0000000..6b4bed8
+--- /dev/null
++++ b/app/src/main/java/chromahub/rhythm/app/infrastructure/service/FloatingLyricsOverlay.kt
+@@ -0,0 +1,669 @@
++/*
++ * Personal addition: a draggable, resizable floating lyrics window drawn over other apps.
++ * Licensed GPL-3.0-or-later, like the rest of the project.
++ */
++
++package chromahub.rhythm.app.infrastructure.service
++
++import android.annotation.SuppressLint
++import android.content.Context
++import android.graphics.Canvas
++import android.graphics.Color
++import android.graphics.LinearGradient
++import android.graphics.Paint
++import android.graphics.Shader
++import android.graphics.Typeface
++import android.graphics.drawable.GradientDrawable
++import android.text.TextUtils
++import android.os.Handler
++import android.os.Looper
++import android.util.Log
++import android.util.TypedValue
++import android.view.Gravity
++import android.view.MotionEvent
++import android.view.View
++import android.view.ViewConfiguration
++import android.view.ViewGroup
++import android.view.WindowManager
++import android.view.animation.DecelerateInterpolator
++import android.widget.FrameLayout
++import android.widget.LinearLayout
++import android.widget.TextView
++import kotlin.math.abs
++
++/**
++ * Shows previous / current / next lyric lines in a small window above other apps.
++ *
++ * - Drag anywhere on the window to move it; a tap (no drag) calls [onTap].
++ * - Drag the grip in the bottom-right corner to resize. Shrinking the window hides the
++ *   previous and next lines, down to a single-line strip.
++ * - The X in the top-left corner calls [onClose].
++ *
++ * Requires the "Display over other apps" permission; the caller must check it first.
++ * All methods must be called on the main thread.
++ */
++class FloatingLyricsOverlay(
++    private val context: Context,
++    private val onTap: () -> Unit,
++    private val onClose: () -> Unit
++) {
++    private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
++    private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
++    private val density = context.resources.displayMetrics.density
++    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
++
++    private var root: FrameLayout? = null
++    private var layoutParams: WindowManager.LayoutParams? = null
++    private var prevView: TextView? = null
++    private var currentView: TextView? = null
++    private var nextView: TextView? = null
++    private var headerView: TextView? = null
++    private var headerText: String = ""
++
++    private var prevText: String = ""
++    private var currentText: String = ""
++    private var nextText: String = ""
++
++    // Word-by-word karaoke fill for the current line (null = plain line).
++    private var currentWords: List<OverlayWord>? = null
++    private var wordCharStarts = IntArray(0)
++    private var wordCharEnds = IntArray(0)
++    private var lastWordPos = -1L
++
++    // Corner buttons (close / resize) fade out a few seconds after the last touch.
++    private val mainHandler = Handler(Looper.getMainLooper())
++    private var closeView: IconView? = null
++    private var gripView: IconView? = null
++    private var controlsVisible = true
++    private val fadeRunnable = Runnable {
++        controlsVisible = false
++        closeView?.animate()?.alpha(0f)?.setDuration(350)?.start()
++        gripView?.animate()?.alpha(0f)?.setDuration(350)?.start()
++    }
++
++    val isShowing: Boolean get() = root != null
++
++    private fun dp(value: Int): Int = (value * density + 0.5f).toInt()
++
++    @SuppressLint("ClickableViewAccessibility")
++    fun show() {
++        if (root != null) return
++
++        val metrics = context.resources.displayMetrics
++        val screenW = metrics.widthPixels
++        val screenH = metrics.heightPixels
++        val minW = dp(MIN_WIDTH_DP)
++        val minH = dp(MIN_HEIGHT_DP)
++        val maxW = maxOf(minW, screenW)
++        val maxH = maxOf(minH, minOf(screenH, dp(MAX_HEIGHT_DP)))
++
++        val defaultW = minOf(dp(DEFAULT_WIDTH_DP), screenW - dp(24))
++        val width = prefs.getInt(KEY_W, defaultW).coerceIn(minW, maxW)
++        val height = prefs.getInt(KEY_H, dp(DEFAULT_HEIGHT_DP)).coerceIn(minH, maxH)
++        val startX = prefs.getInt(KEY_X, (screenW - width) / 2).coerceIn(0, maxOf(0, screenW - width))
++        val statusBarId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
++        val statusBar = if (statusBarId > 0) context.resources.getDimensionPixelSize(statusBarId) else dp(24)
++        val startY = prefs.getInt(KEY_Y, statusBar + dp(8)).coerceIn(0, maxOf(0, screenH - height))
++
++        val lp = WindowManager.LayoutParams(
++            width,
++            height,
++            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
++            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
++                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
++            android.graphics.PixelFormat.TRANSLUCENT
++        )
++        lp.gravity = Gravity.TOP or Gravity.START
++        lp.x = startX
++        lp.y = startY
++
++        val container = FrameLayout(context)
++        // Fully transparent normally; a faint panel shows only while dragging/resizing so you
++        // can see the window's edges.
++        val bg = GradientDrawable().apply {
++            setColor(IDLE_BG)
++            cornerRadius = dp(16).toFloat()
++        }
++        container.background = bg
++        container.clipChildren = false
++        container.clipToPadding = false
++
++        val column = LinearLayout(context).apply {
++            orientation = LinearLayout.VERTICAL
++            gravity = Gravity.CENTER_VERTICAL
++            setPadding(dp(SIDE_PADDING_DP), dp(4), dp(SIDE_PADDING_DP), dp(4))
++            clipChildren = false
++            clipToPadding = false
++        }
++        val header = makeHeader()
++        val prev = makeLine(13f, false)
++        val cur = makeLine(18f, true)
++        val next = makeLine(13f, false)
++        val wrap = LinearLayout.LayoutParams(
++            ViewGroup.LayoutParams.MATCH_PARENT,
++            ViewGroup.LayoutParams.WRAP_CONTENT
++        )
++        column.addView(header, LinearLayout.LayoutParams(wrap))
++        column.addView(prev, LinearLayout.LayoutParams(wrap))
++        column.addView(cur, LinearLayout.LayoutParams(wrap))
++        column.addView(next, LinearLayout.LayoutParams(wrap))
++        container.addView(
++            column,
++            FrameLayout.LayoutParams(
++                ViewGroup.LayoutParams.MATCH_PARENT,
++                ViewGroup.LayoutParams.MATCH_PARENT
++            )
++        )
++
++        val close = IconView(context, IconView.CLOSE, density)
++        close.setOnTouchListener { _, event ->
++            if (!controlsVisible) {
++                // Hidden: reveal the buttons and let the window treat this as a normal touch.
++                showControls()
++                false
++            } else {
++                when (event.actionMasked) {
++                    MotionEvent.ACTION_UP -> {
++                        onClose()
++                        true
++                    }
++                    else -> true
++                }
++            }
++        }
++        val closeParams = FrameLayout.LayoutParams(dp(22), dp(22), Gravity.TOP or Gravity.START)
++        closeParams.setMargins(dp(3), dp(3), 0, 0)
++        container.addView(close, closeParams)
++
++        val grip = IconView(context, IconView.GRIP, density)
++        val gripParams = FrameLayout.LayoutParams(dp(22), dp(22), Gravity.BOTTOM or Gravity.END)
++        gripParams.setMargins(0, 0, dp(3), dp(3))
++        container.addView(grip, gripParams)
++
++        // Drag the whole window; a tap without movement opens the app.
++        var downRawX = 0f
++        var downRawY = 0f
++        var originX = 0
++        var originY = 0
++        var dragging = false
++        container.setOnTouchListener { _, event ->
++            when (event.actionMasked) {
++                MotionEvent.ACTION_DOWN -> {
++                    downRawX = event.rawX
++                    downRawY = event.rawY
++                    originX = lp.x
++                    originY = lp.y
++                    dragging = false
++                    bg.setColor(EDIT_BG)
++                    showControls()
++                    true
++                }
++                MotionEvent.ACTION_MOVE -> {
++                    val dx = event.rawX - downRawX
++                    val dy = event.rawY - downRawY
++                    if (!dragging && (abs(dx) > touchSlop || abs(dy) > touchSlop)) dragging = true
++                    if (dragging) {
++                        lp.x = (originX + dx).toInt()
++                        lp.y = (originY + dy).toInt()
++                        clampPosition(lp)
++                        updateLayout()
++                    }
++                    true
++                }
++                MotionEvent.ACTION_UP -> {
++                    bg.setColor(IDLE_BG)
++                    scheduleControlsFade()
++                    if (dragging) savePosition() else onTap()
++                    true
++                }
++                MotionEvent.ACTION_CANCEL -> {
++                    bg.setColor(IDLE_BG)
++                    scheduleControlsFade()
++                    true
++                }
++                else -> false
++            }
++        }
++
++        // Resize from the bottom-right grip.
++        var gripDownX = 0f
++        var gripDownY = 0f
++        var originW = 0
++        var originH = 0
++        grip.setOnTouchListener { _, event ->
++            when (event.actionMasked) {
++                MotionEvent.ACTION_DOWN -> {
++                    if (!controlsVisible) {
++                        showControls()
++                        false
++                    } else {
++                        gripDownX = event.rawX
++                        gripDownY = event.rawY
++                        originW = lp.width
++                        originH = lp.height
++                        bg.setColor(EDIT_BG)
++                        showControls()
++                        true
++                    }
++                }
++                MotionEvent.ACTION_MOVE -> {
++                    lp.width = (originW + (event.rawX - gripDownX)).toInt().coerceIn(minW, maxW)
++                    lp.height = (originH + (event.rawY - gripDownY)).toInt().coerceIn(minH, maxH)
++                    clampPosition(lp)
++                    updateLayout()
++                    applyLineVisibility()
++                    renderTexts()
++                    true
++                }
++                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
++                    bg.setColor(IDLE_BG)
++                    saveSize()
++                    scheduleControlsFade()
++                    true
++                }
++                else -> true
++            }
++        }
++
++        try {
++            windowManager.addView(container, lp)
++        } catch (e: Exception) {
++            Log.e(TAG, "Could not add floating lyrics window (overlay permission missing?)", e)
++            return
++        }
++
++        root = container
++        layoutParams = lp
++        closeView = close
++        gripView = grip
++        headerView = header
++        prevView = prev
++        currentView = cur
++        nextView = next
++        applyLineVisibility()
++        renderTexts()
++        showControls()
++        scheduleControlsFade()
++    }
++
++    fun hide() {
++        val r = root ?: return
++        try {
++            windowManager.removeView(r)
++        } catch (e: Exception) {
++            Log.w(TAG, "removeView failed", e)
++        }
++        mainHandler.removeCallbacks(fadeRunnable)
++        root = null
++        layoutParams = null
++        closeView = null
++        gripView = null
++        headerView = null
++        prevView = null
++        currentView = null
++        nextView = null
++    }
++
++    /** Update the three visible lines. Pass null/blank for "nothing". */
++    fun setLines(prev: String?, current: String?, next: String?, words: List<OverlayWord>? = null) {
++        val newPrev = prev.orEmpty()
++        val newCurrent = current.orEmpty()
++        val newNext = next.orEmpty()
++
++        // Work out whether the lyrics just stepped forward/backward by one line (scroll animation)
++        // or jumped somewhere else (simple fade).
++        val direction = when {
++            currentText.isNotBlank() && nextText.isNotBlank() &&
++                newPrev == currentText && newCurrent == nextText -> 1
++            currentText.isNotBlank() && prevText.isNotBlank() &&
++                newNext == currentText && newCurrent == prevText -> -1
++            else -> 0
++        }
++
++        prevText = newPrev
++        currentText = newCurrent
++        nextText = newNext
++        currentWords = words?.takeIf { it.isNotEmpty() }
++        computeWordOffsets()
++        lastWordPos = -1L
++        if (root == null) return
++        renderTexts()
++        if (currentWords == null) currentView?.paint?.shader = null
++
++        if (direction == 0) {
++            resetLineAnimations()
++            currentView?.let {
++                it.alpha = 0.35f
++                it.animate().alpha(1f).setDuration(160).start()
++            }
++        } else {
++            slideLines(direction)
++        }
++    }
++
++    private fun computeWordOffsets() {
++        val words = currentWords
++        if (words == null) {
++            wordCharStarts = IntArray(0)
++            wordCharEnds = IntArray(0)
++            return
++        }
++        val starts = IntArray(words.size)
++        val ends = IntArray(words.size)
++        var len = 0
++        words.forEachIndexed { i, w ->
++            if (i > 0 && !(w.isPart && w.text.isNotEmpty())) len += 1
++            starts[i] = len
++            len += w.text.length
++            ends[i] = len
++        }
++        wordCharStarts = starts
++        wordCharEnds = ends
++    }
++
++    /**
++     * Word-by-word fill: words already sung are bright, upcoming words dim, with a soft edge that
++     * moves smoothly through the active word. Call often (e.g. every ~50 ms) while playing.
++     */
++    fun updateWordProgress(positionMs: Long) {
++        val words = currentWords ?: return
++        val tv = currentView ?: return
++        if (positionMs == lastWordPos) return
++        val text = tv.text?.toString() ?: return
++        if (text.isEmpty() || tv.width <= 0 || wordCharEnds.size != words.size) return
++        lastWordPos = positionMs
++
++        // How far through the line are we, in characters (fractional)?
++        var chars = 0f
++        for (i in words.indices) {
++            val w = words[i]
++            if (positionMs >= w.end) {
++                chars = wordCharEnds[i].toFloat()
++            } else if (positionMs > w.start) {
++                val span = (w.end - w.start).coerceAtLeast(1L)
++                val frac = (positionMs - w.start).toFloat() / span
++                chars = wordCharStarts[i] + frac * (wordCharEnds[i] - wordCharStarts[i])
++                break
++            } else {
++                break
++            }
++        }
++
++        val paint = tv.paint
++        val total = paint.measureText(text)
++        if (total <= 0f) return
++        val whole = chars.toInt().coerceIn(0, text.length)
++        val frac = chars - whole
++        val x0 = paint.measureText(text, 0, whole)
++        val x1 = paint.measureText(text, 0, (whole + 1).coerceAtMost(text.length))
++        val x = x0 + frac * (x1 - x0)
++        val available = (tv.width - tv.paddingLeft - tv.paddingRight).toFloat()
++        val left = if (total < available) (available - total) / 2f else 0f
++        val p = (x / total).coerceIn(0f, 1f)
++        val soft = 0.05f
++        paint.shader = LinearGradient(
++            left, 0f, left + total, 0f,
++            intArrayOf(SUNG_COLOR, SUNG_COLOR, UNSUNG_COLOR, UNSUNG_COLOR),
++            floatArrayOf(0f, p, (p + soft).coerceAtMost(1f), 1f),
++            Shader.TileMode.CLAMP
++        )
++        tv.invalidate()
++    }
++
++    private fun resetLineAnimations() {
++        listOfNotNull(prevView, currentView, nextView).forEach {
++            it.animate().cancel()
++            it.translationY = 0f
++            it.alpha = 1f
++        }
++    }
++
++    /**
++     * Scroll effect: every visible line starts one step below (or above, going backwards) its
++     * final place and glides into it, so the lyrics look like they scroll up.
++     */
++    private fun slideLines(direction: Int) {
++        val h = layoutParams?.height ?: return
++        val distance = (if (h < dp(NEXT_MIN_HEIGHT_DP)) dp(10) else dp(SLIDE_DISTANCE_DP)).toFloat()
++        val interpolator = DecelerateInterpolator()
++        val incoming = if (direction > 0) nextView else prevView
++        listOfNotNull(prevView, currentView, nextView).forEach { v ->
++            v.animate().cancel()
++            if (v.visibility != View.VISIBLE) {
++                v.translationY = 0f
++                v.alpha = 1f
++                return@forEach
++            }
++            v.translationY = distance * direction
++            v.alpha = when {
++                v === incoming -> 0f
++                v === currentView -> 0.4f
++                else -> 0.6f
++            }
++            v.animate()
++                .translationY(0f)
++                .alpha(1f)
++                .setDuration(SLIDE_DURATION_MS)
++                .setInterpolator(interpolator)
++                .start()
++        }
++    }
++
++    private fun showControls() {
++        mainHandler.removeCallbacks(fadeRunnable)
++        controlsVisible = true
++        closeView?.animate()?.cancel()
++        closeView?.alpha = 1f
++        gripView?.animate()?.cancel()
++        gripView?.alpha = 1f
++    }
++
++    private fun scheduleControlsFade() {
++        mainHandler.removeCallbacks(fadeRunnable)
++        mainHandler.postDelayed(fadeRunnable, CONTROLS_FADE_DELAY_MS)
++    }
++
++    /** Small "Title – Artist" line, only visible when the window is tall enough. */
++    fun setHeader(text: String?) {
++        headerText = text.orEmpty()
++        if (root == null) return
++        applyLineVisibility()
++        renderTexts()
++    }
++
++    private fun makeHeader(): TextView {
++        val tv = TextView(context)
++        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
++        tv.setTextColor(HEADER_COLOR)
++        tv.setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), DIM_SHADOW_COLOR)
++        tv.typeface = Typeface.DEFAULT
++        tv.gravity = Gravity.CENTER
++        tv.maxLines = 1
++        tv.ellipsize = TextUtils.TruncateAt.END
++        tv.includeFontPadding = false
++        tv.setPadding(0, dp(1), 0, dp(2))
++        return tv
++    }
++
++    private fun makeLine(sizeSp: Float, isCurrent: Boolean): TextView {
++        val tv = TextView(context)
++        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
++        if (isCurrent) {
++            // Bright white with a soft coloured glow around the letters.
++            tv.setTextColor(Color.WHITE)
++            tv.setShadowLayer(dp(GLOW_RADIUS_DP).toFloat(), 0f, 0f, GLOW_COLOR)
++        } else {
++            // Dimmer lines get a small dark shadow so they stay readable with no background panel.
++            tv.setTextColor(DIM_TEXT_COLOR)
++            tv.setShadowLayer(dp(3).toFloat(), 0f, dp(1).toFloat(), DIM_SHADOW_COLOR)
++        }
++        tv.typeface = if (isCurrent) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
++        tv.gravity = Gravity.CENTER
++        tv.maxLines = 1
++        tv.ellipsize = TextUtils.TruncateAt.END
++        tv.includeFontPadding = false
++        tv.setPadding(0, dp(1), 0, dp(1))
++        return tv
++    }
++
++    /** Hide the previous/next lines when the window is too short to fit them. */
++    private fun applyLineVisibility() {
++        val h = layoutParams?.height ?: return
++        headerView?.visibility =
++            if (h >= dp(HEADER_MIN_HEIGHT_DP) && headerText.isNotEmpty()) View.VISIBLE else View.GONE
++        prevView?.visibility = if (h >= dp(PREV_MIN_HEIGHT_DP)) View.VISIBLE else View.GONE
++        nextView?.visibility = if (h >= dp(NEXT_MIN_HEIGHT_DP)) View.VISIBLE else View.GONE
++    }
++
++    private fun renderTexts() {
++        val lp = layoutParams ?: return
++        val available = lp.width - dp(SIDE_PADDING_DP) * 2
++        headerView?.let { setFitted(it, headerText, 11f, 9f, available) }
++        prevView?.let { setFitted(it, prevText, 13f, 10f, available) }
++        currentView?.let { setFitted(it, if (currentText.isBlank()) "\u266A" else currentText, 18f, 11f, available) }
++        nextView?.let { setFitted(it, nextText, 13f, 10f, available) }
++    }
++
++    /** Shrink the text size until it fits one line (down to minSp), then ellipsize. */
++    private fun setFitted(tv: TextView, text: String, maxSp: Float, minSp: Float, availablePx: Int) {
++        tv.text = text
++        var sp = maxSp
++        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
++        if (text.isEmpty() || availablePx <= 0) return
++        while (sp > minSp && tv.paint.measureText(text) > availablePx) {
++            sp -= 1f
++            tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
++        }
++    }
++
++    private fun clampPosition(lp: WindowManager.LayoutParams) {
++        val metrics = context.resources.displayMetrics
++        lp.x = lp.x.coerceIn(0, maxOf(0, metrics.widthPixels - lp.width))
++        lp.y = lp.y.coerceIn(0, maxOf(0, metrics.heightPixels - lp.height))
++    }
++
++    private fun updateLayout() {
++        val r = root ?: return
++        val lp = layoutParams ?: return
++        try {
++            windowManager.updateViewLayout(r, lp)
++        } catch (e: Exception) {
++            Log.w(TAG, "updateViewLayout failed", e)
++        }
++    }
++
++    private fun savePosition() {
++        val lp = layoutParams ?: return
++        prefs.edit().putInt(KEY_X, lp.x).putInt(KEY_Y, lp.y).apply()
++    }
++
++    private fun saveSize() {
++        val lp = layoutParams ?: return
++        prefs.edit()
++            .putInt(KEY_W, lp.width)
++            .putInt(KEY_H, lp.height)
++            .putInt(KEY_X, lp.x)
++            .putInt(KEY_Y, lp.y)
++            .apply()
++    }
++
++    /** Tiny line-drawn icons (close X and resize grip) so no icon fonts or resources are needed. */
++    private class IconView(context: Context, private val kind: Int, density: Float) : View(context) {
++        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
++            color = 0xDDFFFFFF.toInt()
++            style = Paint.Style.STROKE
++            strokeWidth = 2f * density
++            strokeCap = Paint.Cap.ROUND
++        }
++        private val underlay = Paint(Paint.ANTI_ALIAS_FLAG).apply {
++            color = 0x88000000.toInt()
++            style = Paint.Style.STROKE
++            strokeWidth = 4.5f * density
++            strokeCap = Paint.Cap.ROUND
++        }
++
++        override fun onDraw(canvas: Canvas) {
++            super.onDraw(canvas)
++            val w = width.toFloat()
++            val h = height.toFloat()
++            if (kind == CLOSE) {
++                val m = w * 0.3f
++                canvas.drawLine(m, m, w - m, h - m, underlay)
++                canvas.drawLine(w - m, m, m, h - m, underlay)
++                canvas.drawLine(m, m, w - m, h - m, paint)
++                canvas.drawLine(w - m, m, m, h - m, paint)
++            } else {
++                canvas.drawLine(w * 0.35f, h * 0.85f, w * 0.85f, h * 0.35f, underlay)
++                canvas.drawLine(w * 0.6f, h * 0.85f, w * 0.85f, h * 0.6f, underlay)
++                canvas.drawLine(w * 0.35f, h * 0.85f, w * 0.85f, h * 0.35f, paint)
++                canvas.drawLine(w * 0.6f, h * 0.85f, w * 0.85f, h * 0.6f, paint)
++            }
++        }
++
++        companion object {
++            const val CLOSE = 0
++            const val GRIP = 1
++        }
++    }
++
++    private companion object {
++        const val TAG = "FloatingLyrics"
++        const val PREFS = "floating_lyrics"
++        const val KEY_X = "x"
++        const val KEY_Y = "y"
++        const val KEY_W = "w"
++        const val KEY_H = "h"
++
++        const val MIN_WIDTH_DP = 150
++        const val MIN_HEIGHT_DP = 38      // one line of text fits
++        const val NEXT_MIN_HEIGHT_DP = 58 // current + next fit
++        const val PREV_MIN_HEIGHT_DP = 76 // previous + current + next fit
++        const val HEADER_MIN_HEIGHT_DP = 104 // title/artist line fits above the three lyric lines
++        const val DEFAULT_WIDTH_DP = 340
++        const val DEFAULT_HEIGHT_DP = 96
++        const val MAX_HEIGHT_DP = 220
++        const val SIDE_PADDING_DP = 28
++        const val GLOW_RADIUS_DP = 10
++        const val CONTROLS_FADE_DELAY_MS = 3000L
++        const val SLIDE_DISTANCE_DP = 18
++        const val SLIDE_DURATION_MS = 240L
++        const val IDLE_BG = 0x00000000
++        const val EDIT_BG = 0x55000000
++        val GLOW_COLOR: Int = Color.parseColor("#7C4DFF")
++        val DIM_TEXT_COLOR: Int = Color.parseColor("#CCFFFFFF")
++        val DIM_SHADOW_COLOR: Int = Color.parseColor("#CC000000")
++        val HEADER_COLOR: Int = Color.parseColor("#99FFFFFF")
++        val SUNG_COLOR: Int = Color.WHITE
++        val UNSUNG_COLOR: Int = Color.parseColor("#66FFFFFF")
++    }
++}
++
++/**
++ * Counts this app's started (visible) activities so the floating lyrics window can hide itself
++ * while My Player is open. Updated from RhythmApplication's activity lifecycle callbacks.
++ */
++object AppVisibility {
++    @Volatile
++    private var startedActivities = 0
++
++    fun onActivityStarted() {
++        startedActivities++
++    }
++
++    fun onActivityStopped() {
++        if (startedActivities > 0) startedActivities--
++    }
++
++    fun isOpen(): Boolean = startedActivities > 0
++}
++
++/** One word of the current lyric line with its timing (milliseconds). */
++class OverlayWord(val text: String, val isPart: Boolean, val start: Long, val end: Long)
++
++/** Joins words the same way the app does: syllable parts attach with no space. */
++internal fun joinOverlayWords(words: List<OverlayWord>): String = buildString {
++    words.forEachIndexed { i, w ->
++        if (i > 0 && !(w.isPart && w.text.isNotEmpty())) append(' ')
++        append(w.text)
++    }
++}
+diff --git a/app/src/main/java/chromahub/rhythm/app/infrastructure/service/MediaPlaybackService.kt b/app/src/main/java/chromahub/rhythm/app/infrastructure/service/MediaPlaybackService.kt
+index 9f2795a..c960aca 100644
+--- a/app/src/main/java/chromahub/rhythm/app/infrastructure/service/MediaPlaybackService.kt
++++ b/app/src/main/java/chromahub/rhythm/app/infrastructure/service/MediaPlaybackService.kt
+@@ -211,9 +211,155 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
+         currentLyricTimestamps = longArrayOf()
+         currentPlainLyricsLines = emptyList()
+         currentLyricIndex = -1
++        setWordLines(null)
+         chromahub.rhythm.app.infrastructure.widget.glance.GlanceWidgetUpdater.updateLyrics(this, emptyList(), -1)
+     }
+ 
++    // ---- Floating lyrics window (draggable/resizable overlay) ------------------------------
++    private var floatingLyrics: FloatingLyricsOverlay? = null
++    private var floatingLyricsJob: Job? = null
++    private var overlayLastTexts: List<String>? = null
++    private var overlayLastIndex: Int = -2
++    private var overlayAppOpen = false
++    private var overlayWordMode = false
++    private var overlayLastHeader: String? = null
++    private var wordLineTexts: List<String> = emptyList()
++    private var wordLineStamps: LongArray = longArrayOf()
++    private var wordLineWords: List<List<OverlayWord>> = emptyList()
++    private var overlayAppOpenSince = 0L
++
++    private fun refreshFloatingLyrics() {
++        if (!::appSettings.isInitialized) return
++        val allowed = appSettings.floatingLyricsEnabled.value &&
++            android.provider.Settings.canDrawOverlays(this)
++        if (!allowed) {
++            stopFloatingLyrics()
++            return
++        }
++        if (floatingLyrics == null) {
++            floatingLyrics = FloatingLyricsOverlay(
++                context = this,
++                onTap = { openAppFromOverlay() },
++                onClose = { appSettings.setFloatingLyricsEnabled(false) }
++            )
++        }
++        if (floatingLyricsJob?.isActive != true) {
++            floatingLyricsJob = serviceScope.launch {
++                while (true) {
++                    tickFloatingLyrics()
++                    delay(if (overlayWordMode) 50L else 150L)
++                }
++            }
++        }
++    }
++
++    private fun setWordLines(json: String?) {
++        val lines = if (!json.isNullOrBlank()) {
++            try {
++                chromahub.rhythm.app.util.RhythmLyricsParser.parseWordByWordLyrics(json)
++                    .filter { !it.background && it.words.isNotEmpty() }
++                    .sortedBy { it.lineTimestamp }
++            } catch (e: Exception) {
++                Log.w(TAG, "Could not parse word-by-word lyrics for floating window", e)
++                emptyList()
++            }
++        } else {
++            emptyList()
++        }
++        val words = lines.map { line ->
++            line.words
++                .map { OverlayWord(it.text.trim(), it.isPart, it.timestamp, it.endtime) }
++                .filter { it.text.isNotEmpty() }
++        }
++        val keep = words.indices.filter { words[it].isNotEmpty() }
++        wordLineWords = keep.map { words[it] }
++        wordLineTexts = wordLineWords.map { joinOverlayWords(it) }
++        wordLineStamps = keep.map { lines[it].lineTimestamp }.toLongArray()
++    }
++
++    private fun tickFloatingLyrics() {
++        val overlay = floatingLyrics ?: return
++        if (!::player.isInitialized) return
++
++        // Hide while My Player's own screens are open; show again when they close.
++        // Debounced (400 ms) so rotating the screen doesn't make the window flicker.
++        val appOpen = AppVisibility.isOpen()
++        val now = android.os.SystemClock.elapsedRealtime()
++        if (appOpen != overlayAppOpen) {
++            overlayAppOpen = appOpen
++            overlayAppOpenSince = now
++        }
++        if (now - overlayAppOpenSince >= 400L) {
++            if (appOpen && overlay.isShowing) overlay.hide()
++            if (!appOpen && !overlay.isShowing && android.provider.Settings.canDrawOverlays(this)) overlay.show()
++        }
++        if (!overlay.isShowing) return
++
++        // Small "Title – Artist" line (the window only shows it when it is tall enough).
++        val metadata = player.currentMediaItem?.mediaMetadata
++        val header = listOfNotNull(metadata?.title?.toString(), metadata?.artist?.toString())
++            .filter { it.isNotBlank() }
++            .joinToString(" \u2013 ")
++        if (header != overlayLastHeader) {
++            overlayLastHeader = header
++            overlay.setHeader(header)
++        }
++
++        // Prefer word-by-word lines when the song has them; otherwise plain line-by-line LRC.
++        val usingWords = wordLineTexts.isNotEmpty()
++        val texts: List<String> = if (usingWords) wordLineTexts else currentLyricTexts
++        val stamps: LongArray = if (usingWords) wordLineStamps else currentLyricTimestamps
++        val position = player.currentPosition
++        var index = -1
++        if (texts.isNotEmpty() && stamps.size == texts.size) {
++            val lookahead = position + 120L
++            for (i in stamps.indices) {
++                if (stamps[i] <= lookahead) index = i
++            }
++        }
++        overlayWordMode = usingWords && index >= 0
++
++        if (!(texts === overlayLastTexts && index == overlayLastIndex)) {
++            overlayLastTexts = texts
++            overlayLastIndex = index
++            if (texts.isEmpty()) {
++                overlay.setLines(null, "\u266A", null)
++            } else if (index < 0) {
++                overlay.setLines(null, "\u266A", texts.firstOrNull())
++            } else {
++                overlay.setLines(
++                    texts.getOrNull(index - 1),
++                    texts[index],
++                    texts.getOrNull(index + 1),
++                    if (usingWords) wordLineWords.getOrNull(index) else null
++                )
++            }
++        }
++        if (overlayWordMode) overlay.updateWordProgress(position)
++    }
++
++    private fun stopFloatingLyrics() {
++        floatingLyricsJob?.cancel()
++        floatingLyricsJob = null
++        floatingLyrics?.hide()
++        floatingLyrics = null
++        overlayLastTexts = null
++        overlayLastIndex = -2
++        overlayAppOpen = false
++        overlayAppOpenSince = 0L
++        overlayLastHeader = null
++    }
++
++    private fun openAppFromOverlay() {
++        try {
++            val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return
++            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
++            startActivity(launch)
++        } catch (e: Exception) {
++            Log.w(TAG, "Could not open app from floating lyrics", e)
++        }
++    }
++
+     private val btReceiver = object : BroadcastReceiver() {
+         override fun onReceive(context: Context?, intent: Intent?) {
+             val action = intent?.action ?: return
+@@ -1281,6 +1427,11 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
+                 }
+             }
+         }
++
++        // Floating lyrics window: show/hide when the setting changes (also restores it on start)
++        serviceScope.launch {
++            appSettings.floatingLyricsEnabled.collect { refreshFloatingLyrics() }
++        }
+     }
+ 
+     private inline fun <T> withEqualizerSafe(
+@@ -2449,6 +2600,7 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
+     override fun onDestroy() {
+         instanceForWidgetAndLyricsOnly = null
+         Log.d(TAG, "Service being destroyed")
++        stopFloatingLyrics()
+ 
+         // Persist final playback position and index on destroy
+         if (::player.isInitialized && appSettings.queuePersistenceEnabled.value) {
+@@ -2583,6 +2735,7 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
+                         currentLyricTranslations = translations ?: emptyList()
+                         currentLyricRomanizations = romanizations ?: emptyList()
+                         currentLyricTimestamps = timestamps ?: longArrayOf()
++                        setWordLines(args.getString("lyric_wbw_json"))
+                         
+                         val plainLyrics = args.getString("plain_lyrics")
+                         currentPlainLyricsLines = if (!plainLyrics.isNullOrBlank()) {
+diff --git a/app/src/main/java/chromahub/rhythm/app/shared/data/model/AppSettings.kt b/app/src/main/java/chromahub/rhythm/app/shared/data/model/AppSettings.kt
+index 8e8241b..807fe10 100644
+--- a/app/src/main/java/chromahub/rhythm/app/shared/data/model/AppSettings.kt
++++ b/app/src/main/java/chromahub/rhythm/app/shared/data/model/AppSettings.kt
+@@ -341,6 +341,7 @@ class AppSettings private constructor(context: Context) {
+         // General Broadcast Status Settings (for Tasker, KWGT, etc.)
+         private const val KEY_BROADCAST_STATUS_ENABLED = "broadcast_status_enabled"
+         private const val KEY_BLUETOOTH_LYRICS_ENABLED = "bluetooth_lyrics_enabled"
++        private const val KEY_FLOATING_LYRICS_ENABLED = "floating_lyrics_enabled"
+         
+         // Enhanced User Preferences
+         private const val KEY_FAVORITE_GENRES = "favorite_genres"
+@@ -1761,6 +1762,9 @@ class AppSettings private constructor(context: Context) {
+     private val _bluetoothLyricsEnabled = MutableStateFlow(prefs.getBoolean(KEY_BLUETOOTH_LYRICS_ENABLED, false))
+     val bluetoothLyricsEnabled: StateFlow<Boolean> = _bluetoothLyricsEnabled.asStateFlow()
+ 
++    private val _floatingLyricsEnabled = MutableStateFlow(prefs.getBoolean(KEY_FLOATING_LYRICS_ENABLED, false))
++    val floatingLyricsEnabled: StateFlow<Boolean> = _floatingLyricsEnabled.asStateFlow()
++
+     // Enhanced User Preferences
+     private val _favoriteGenres = MutableStateFlow<Map<String, Int>>(
+         try {
+@@ -3903,6 +3907,11 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
+         _bluetoothLyricsEnabled.value = enabled
+     }
+ 
++    fun setFloatingLyricsEnabled(enabled: Boolean) {
++        prefs.edit { putBoolean(KEY_FLOATING_LYRICS_ENABLED, enabled) }
++        _floatingLyricsEnabled.value = enabled
++    }
++
+     // Enhanced User Preferences Methods
+     fun updateFavoriteGenres(genres: Map<String, Int>) {
+         val json = Gson().toJson(genres)
+@@ -5629,6 +5638,7 @@ private val _autoCheckForUpdates = MutableStateFlow(prefs.getBoolean(KEY_AUTO_CH
+         // General Broadcast Status Settings
+         _broadcastStatusEnabled.value = prefs.getBoolean(KEY_BROADCAST_STATUS_ENABLED, false)
+         _bluetoothLyricsEnabled.value = prefs.getBoolean(KEY_BLUETOOTH_LYRICS_ENABLED, false)
++        _floatingLyricsEnabled.value = prefs.getBoolean(KEY_FLOATING_LYRICS_ENABLED, false)
+         
+         // App Updates
+         _autoCheckForUpdates.value = prefs.getBoolean(KEY_AUTO_CHECK_FOR_UPDATES, false)
+diff --git a/app/src/main/java/chromahub/rhythm/app/shared/presentation/screens/settings/LyricsSettingsScreen.kt b/app/src/main/java/chromahub/rhythm/app/shared/presentation/screens/settings/LyricsSettingsScreen.kt
+index 21ecec3..04691bf 100644
+--- a/app/src/main/java/chromahub/rhythm/app/shared/presentation/screens/settings/LyricsSettingsScreen.kt
++++ b/app/src/main/java/chromahub/rhythm/app/shared/presentation/screens/settings/LyricsSettingsScreen.kt
+@@ -175,6 +175,7 @@ fun LyricsSettingsScreen(onBackClick: () -> Unit) {
+ 
+     val lyricsSourcePreference by appSettings.lyricsSourcePreference.collectAsState()
+     val bluetoothLyricsEnabled by appSettings.bluetoothLyricsEnabled.collectAsState()
++    val floatingLyricsEnabled by appSettings.floatingLyricsEnabled.collectAsState()
+     val broadcastStatusEnabled by appSettings.broadcastStatusEnabled.collectAsState()
+     var showPriorityBottomSheet by remember { mutableStateOf(false) }
+     var showLrcRenameBottomSheet by remember { mutableStateOf(false) }
+@@ -809,6 +810,58 @@ fun LyricsSettingsScreen(onBackClick: () -> Unit) {
+                 )
+             }
+ 
++            // Floating lyrics
++            item {
++                Spacer(modifier = Modifier.height(12.dp))
++                Text(
++                    text = "Floating lyrics",
++                    style = MaterialTheme.typography.titleSmall.copy(
++                        fontWeight = FontWeight.SemiBold
++                    ),
++                    color = MaterialTheme.colorScheme.primary,
++                    modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
++                )
++
++                Material3SettingsGroup(
++                    items = listOf(
++                        toMaterial3SettingsItem(
++                            context = context,
++                            hapticFeedback = hapticFeedback,
++                            item = SettingItem(
++                                icon = MaterialSymbolIcon("lyrics"),
++                                title = "Floating lyrics",
++                                description = "Previous, current and next line in a draggable, resizable window over other apps. Needs lyrics enabled.",
++                                toggleState = floatingLyricsEnabled,
++                                onToggleChange = { enable ->
++                                    if (enable && !android.provider.Settings.canDrawOverlays(context)) {
++                                        Toast.makeText(
++                                            context,
++                                            "Allow \"Display over other apps\" and floating lyrics will turn on by itself",
++                                            Toast.LENGTH_LONG
++                                        ).show()
++                                        try {
++                                            context.getSharedPreferences("floating_lyrics", android.content.Context.MODE_PRIVATE)
++                                                .edit().putBoolean("pending_enable", true).apply()
++                                            context.startActivity(
++                                                Intent(
++                                                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
++                                                    Uri.parse("package:" + context.packageName)
++                                                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
++                                            )
++                                        } catch (e: Exception) {
++                                            Log.w("LyricsSettings", "Could not open overlay permission settings", e)
++                                        }
++                                    } else {
++                                        appSettings.setFloatingLyricsEnabled(enable)
++                                    }
++                                }
++                            )
++                        )
++                    ),
++                    containerColor = MaterialTheme.colorScheme.surfaceContainer
++                )
++            }
++
+             // Info Card
+             item {
+                 Spacer(modifier = Modifier.height(16.dp))

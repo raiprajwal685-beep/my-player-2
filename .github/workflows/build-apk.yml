@@ -15,11 +15,15 @@ jobs:
           distribution: temurin
           cache: gradle
       - name: Add swap space
+        continue-on-error: true
         run: |
+          sudo swapoff -a
+          sudo rm -f /swapfile
           sudo fallocate -l 8G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
+          free -h
       - name: Build debug APK
         run: |
           chmod +x gradlew

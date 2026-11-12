@@ -211,7 +211,153 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         currentLyricTimestamps = longArrayOf()
         currentPlainLyricsLines = emptyList()
         currentLyricIndex = -1
+        setWordLines(null)
         chromahub.rhythm.app.infrastructure.widget.glance.GlanceWidgetUpdater.updateLyrics(this, emptyList(), -1)
+    }
+
+    // ---- Floating lyrics window (draggable/resizable overlay) ------------------------------
+    private var floatingLyrics: FloatingLyricsOverlay? = null
+    private var floatingLyricsJob: Job? = null
+    private var overlayLastTexts: List<String>? = null
+    private var overlayLastIndex: Int = -2
+    private var overlayAppOpen = false
+    private var overlayWordMode = false
+    private var overlayLastHeader: String? = null
+    private var wordLineTexts: List<String> = emptyList()
+    private var wordLineStamps: LongArray = longArrayOf()
+    private var wordLineWords: List<List<OverlayWord>> = emptyList()
+    private var overlayAppOpenSince = 0L
+
+    private fun refreshFloatingLyrics() {
+        if (!::appSettings.isInitialized) return
+        val allowed = appSettings.floatingLyricsEnabled.value &&
+            android.provider.Settings.canDrawOverlays(this)
+        if (!allowed) {
+            stopFloatingLyrics()
+            return
+        }
+        if (floatingLyrics == null) {
+            floatingLyrics = FloatingLyricsOverlay(
+                context = this,
+                onTap = { openAppFromOverlay() },
+                onClose = { appSettings.setFloatingLyricsEnabled(false) }
+            )
+        }
+        if (floatingLyricsJob?.isActive != true) {
+            floatingLyricsJob = serviceScope.launch {
+                while (true) {
+                    tickFloatingLyrics()
+                    delay(if (overlayWordMode) 50L else 150L)
+                }
+            }
+        }
+    }
+
+    private fun setWordLines(json: String?) {
+        val lines = if (!json.isNullOrBlank()) {
+            try {
+                chromahub.rhythm.app.util.RhythmLyricsParser.parseWordByWordLyrics(json)
+                    .filter { !it.background && it.words.isNotEmpty() }
+                    .sortedBy { it.lineTimestamp }
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not parse word-by-word lyrics for floating window", e)
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
+        val words = lines.map { line ->
+            line.words
+                .map { OverlayWord(it.text.trim(), it.isPart, it.timestamp, it.endtime) }
+                .filter { it.text.isNotEmpty() }
+        }
+        val keep = words.indices.filter { words[it].isNotEmpty() }
+        wordLineWords = keep.map { words[it] }
+        wordLineTexts = wordLineWords.map { joinOverlayWords(it) }
+        wordLineStamps = keep.map { lines[it].lineTimestamp }.toLongArray()
+    }
+
+    private fun tickFloatingLyrics() {
+        val overlay = floatingLyrics ?: return
+        if (!::player.isInitialized) return
+
+        // Hide while My Player's own screens are open; show again when they close.
+        // Debounced (400 ms) so rotating the screen doesn't make the window flicker.
+        val appOpen = AppVisibility.isOpen()
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (appOpen != overlayAppOpen) {
+            overlayAppOpen = appOpen
+            overlayAppOpenSince = now
+        }
+        if (now - overlayAppOpenSince >= 400L) {
+            if (appOpen && overlay.isShowing) overlay.hide()
+            if (!appOpen && !overlay.isShowing && android.provider.Settings.canDrawOverlays(this)) overlay.show()
+        }
+        if (!overlay.isShowing) return
+
+        // Small "Title – Artist" line (the window only shows it when it is tall enough).
+        val metadata = player.currentMediaItem?.mediaMetadata
+        val header = listOfNotNull(metadata?.title?.toString(), metadata?.artist?.toString())
+            .filter { it.isNotBlank() }
+            .joinToString(" \u2013 ")
+        if (header != overlayLastHeader) {
+            overlayLastHeader = header
+            overlay.setHeader(header)
+        }
+
+        // Prefer word-by-word lines when the song has them; otherwise plain line-by-line LRC.
+        val usingWords = wordLineTexts.isNotEmpty()
+        val texts: List<String> = if (usingWords) wordLineTexts else currentLyricTexts
+        val stamps: LongArray = if (usingWords) wordLineStamps else currentLyricTimestamps
+        val position = player.currentPosition
+        var index = -1
+        if (texts.isNotEmpty() && stamps.size == texts.size) {
+            val lookahead = position + 120L
+            for (i in stamps.indices) {
+                if (stamps[i] <= lookahead) index = i
+            }
+        }
+        overlayWordMode = usingWords && index >= 0
+
+        if (!(texts === overlayLastTexts && index == overlayLastIndex)) {
+            overlayLastTexts = texts
+            overlayLastIndex = index
+            if (texts.isEmpty()) {
+                overlay.setLines(null, "\u266A", null)
+            } else if (index < 0) {
+                overlay.setLines(null, "\u266A", texts.firstOrNull())
+            } else {
+                overlay.setLines(
+                    texts.getOrNull(index - 1),
+                    texts[index],
+                    texts.getOrNull(index + 1),
+                    if (usingWords) wordLineWords.getOrNull(index) else null
+                )
+            }
+        }
+        if (overlayWordMode) overlay.updateWordProgress(position)
+    }
+
+    private fun stopFloatingLyrics() {
+        floatingLyricsJob?.cancel()
+        floatingLyricsJob = null
+        floatingLyrics?.hide()
+        floatingLyrics = null
+        overlayLastTexts = null
+        overlayLastIndex = -2
+        overlayAppOpen = false
+        overlayAppOpenSince = 0L
+        overlayLastHeader = null
+    }
+
+    private fun openAppFromOverlay() {
+        try {
+            val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+            startActivity(launch)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not open app from floating lyrics", e)
+        }
     }
 
     private val btReceiver = object : BroadcastReceiver() {
@@ -1280,6 +1426,11 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
                     )
                 }
             }
+        }
+
+        // Floating lyrics window: show/hide when the setting changes (also restores it on start)
+        serviceScope.launch {
+            appSettings.floatingLyricsEnabled.collect { refreshFloatingLyrics() }
         }
     }
 
@@ -2449,6 +2600,7 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
     override fun onDestroy() {
         instanceForWidgetAndLyricsOnly = null
         Log.d(TAG, "Service being destroyed")
+        stopFloatingLyrics()
 
         // Persist final playback position and index on destroy
         if (::player.isInitialized && appSettings.queuePersistenceEnabled.value) {
@@ -2583,6 +2735,7 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
                         currentLyricTranslations = translations ?: emptyList()
                         currentLyricRomanizations = romanizations ?: emptyList()
                         currentLyricTimestamps = timestamps ?: longArrayOf()
+                        setWordLines(args.getString("lyric_wbw_json"))
                         
                         val plainLyrics = args.getString("plain_lyrics")
                         currentPlainLyricsLines = if (!plainLyrics.isNullOrBlank()) {

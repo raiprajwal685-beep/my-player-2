@@ -4620,7 +4620,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val currentLyricsVal = _currentLyrics.value
         
         // Track raw lyrics key (synced or plain) to send updates to service
-        val rawLyricsKey = currentLyricsVal?.syncedLyrics ?: currentLyricsVal?.plainLyrics ?: ""
+        val rawLyricsKey = (currentLyricsVal?.syncedLyrics ?: currentLyricsVal?.plainLyrics ?: "") +
+            (currentLyricsVal?.wordByWordLyrics?.let { "|wbw" + it.hashCode() } ?: "")
         if (cachedSyncedLyricsRaw != rawLyricsKey) {
             cachedSyncedLyricsRaw = rawLyricsKey
             val synced = currentLyricsVal?.syncedLyrics
@@ -4639,6 +4640,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     putStringArrayList("lyric_translations", ArrayList(cachedParsedSyncedLyrics.map { it.translation ?: "" }))
                     putStringArrayList("lyric_romanizations", ArrayList(cachedParsedSyncedLyrics.map { it.romanization ?: "" }))
                     putLongArray("lyric_timestamps", cachedParsedSyncedLyrics.map { it.timestamp }.toLongArray())
+                    // Word-by-word JSON (if the song has it) so the floating lyrics window can do karaoke fill
+                    putString("lyric_wbw_json", currentLyricsVal?.wordByWordLyrics ?: "")
                     val plain = currentLyricsVal?.plainLyrics
                     if (plain != null) {
                         putString("plain_lyrics", plain)

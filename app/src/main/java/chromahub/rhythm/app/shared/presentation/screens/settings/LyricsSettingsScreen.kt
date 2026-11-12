@@ -175,6 +175,7 @@ fun LyricsSettingsScreen(onBackClick: () -> Unit) {
 
     val lyricsSourcePreference by appSettings.lyricsSourcePreference.collectAsState()
     val bluetoothLyricsEnabled by appSettings.bluetoothLyricsEnabled.collectAsState()
+    val floatingLyricsEnabled by appSettings.floatingLyricsEnabled.collectAsState()
     val broadcastStatusEnabled by appSettings.broadcastStatusEnabled.collectAsState()
     var showPriorityBottomSheet by remember { mutableStateOf(false) }
     var showLrcRenameBottomSheet by remember { mutableStateOf(false) }
@@ -800,6 +801,58 @@ fun LyricsSettingsScreen(onBackClick: () -> Unit) {
                                     appSettings.setBluetoothLyricsEnabled(it)
                                     if (it && !broadcastStatusEnabled) {
                                         appSettings.setBroadcastStatusEnabled(true)
+                                    }
+                                }
+                            )
+                        )
+                    ),
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer
+                )
+            }
+
+            // Floating lyrics
+            item {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "Floating lyrics",
+                    style = MaterialTheme.typography.titleSmall.copy(
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+                )
+
+                Material3SettingsGroup(
+                    items = listOf(
+                        toMaterial3SettingsItem(
+                            context = context,
+                            hapticFeedback = hapticFeedback,
+                            item = SettingItem(
+                                icon = MaterialSymbolIcon("lyrics"),
+                                title = "Floating lyrics",
+                                description = "Previous, current and next line in a draggable, resizable window over other apps. Needs lyrics enabled.",
+                                toggleState = floatingLyricsEnabled,
+                                onToggleChange = { enable ->
+                                    if (enable && !android.provider.Settings.canDrawOverlays(context)) {
+                                        Toast.makeText(
+                                            context,
+                                            "Allow \"Display over other apps\" and floating lyrics will turn on by itself",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                        try {
+                                            context.getSharedPreferences("floating_lyrics", android.content.Context.MODE_PRIVATE)
+                                                .edit().putBoolean("pending_enable", true).apply()
+                                            context.startActivity(
+                                                Intent(
+                                                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                                    Uri.parse("package:" + context.packageName)
+                                                ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                            )
+                                        } catch (e: Exception) {
+                                            Log.w("LyricsSettings", "Could not open overlay permission settings", e)
+                                        }
+                                    } else {
+                                        appSettings.setFloatingLyricsEnabled(enable)
                                     }
                                 }
                             )

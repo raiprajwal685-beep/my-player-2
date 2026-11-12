@@ -81,3 +81,10 @@
 -dontwarn java.awt.**
 -dontwarn javax.sound.**
 -dontwarn javax.swing.**
+# Strip verbose/debug/info logging from release builds. The app has ~2,000 Log calls, some on
+# hot paths; removing them saves real time on slow phones.
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+}

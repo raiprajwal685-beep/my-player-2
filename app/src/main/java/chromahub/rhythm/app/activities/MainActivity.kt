@@ -1201,6 +1201,14 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "MainActivity onResume: refreshing audio devices")
         musicViewModel.refreshAudioDevices()
         maybeRequestBatteryOptimizationExemption()
+
+        // Came back from the "Display over other apps" screen after tapping the floating lyrics
+        // toggle: switch the feature on now if the permission was granted.
+        val floatingPrefs = getSharedPreferences("floating_lyrics", MODE_PRIVATE)
+        if (floatingPrefs.getBoolean("pending_enable", false)) {
+            floatingPrefs.edit().remove("pending_enable").apply()
+            if (Settings.canDrawOverlays(this)) appSettings.setFloatingLyricsEnabled(true)
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

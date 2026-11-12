@@ -56,7 +56,22 @@ class RhythmApplication : Application(), ImageLoaderFactory {
         super.onCreate()
         
         instance = this
-        
+
+        // Track whether any of our screens is visible (floating lyrics hides while the app is open)
+        registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
+            override fun onActivityStarted(activity: android.app.Activity) {
+                chromahub.rhythm.app.infrastructure.service.AppVisibility.onActivityStarted()
+            }
+            override fun onActivityResumed(activity: android.app.Activity) {}
+            override fun onActivityPaused(activity: android.app.Activity) {}
+            override fun onActivityStopped(activity: android.app.Activity) {
+                chromahub.rhythm.app.infrastructure.service.AppVisibility.onActivityStopped()
+            }
+            override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) {}
+            override fun onActivityDestroyed(activity: android.app.Activity) {}
+        })
+
         Log.d(TAG, "═══════════════════════════════════════════════════")
         Log.d(TAG, "RhythmApplication onCreate")
         Log.d(TAG, "Build Type: ${BuildConfig.BUILD_TYPE}")

@@ -277,10 +277,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val clearQueueOnNewSong = appSettings.clearQueueOnNewSong
     val shuffleModePersistence = appSettings.shuffleModePersistence
     val repeatModePersistence = appSettings.repeatModePersistence
-    val playbackSpeed = appSettings.playbackSpeed
+    // Speed/pitch are remembered per song and applied by the playback service. These mirror what
+    // the player is using right now, so the existing controls show the current song's values.
+    private val _effectivePlaybackSpeed = MutableStateFlow(1.0f)
+    val playbackSpeed: StateFlow<Float> = _effectivePlaybackSpeed.asStateFlow()
     val defaultPlaybackSpeed = appSettings.defaultPlaybackSpeed
     val useDefaultPlaybackSpeed = appSettings.useDefaultPlaybackSpeed
-    val playbackPitch = appSettings.playbackPitch
+    private val _effectivePlaybackPitch = MutableStateFlow(1.0f)
+    val playbackPitch: StateFlow<Float> = _effectivePlaybackPitch.asStateFlow()
     
     // Equalizer settings
     val equalizerEnabled = appSettings.equalizerEnabled
@@ -4113,13 +4117,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                 }
                             }
 
-                            // Restore saved playback speed and pitch
-                            val savedSpeed = appSettings.playbackSpeed.value
-                            val savedPitch = appSettings.playbackPitch.value
-                            Log.d(TAG, "Restoring saved playback speed: $savedSpeed, pitch: $savedPitch")
-                            if (controller.playbackParameters.speed != savedSpeed || controller.playbackParameters.pitch != savedPitch) {
-                                controller.playbackParameters = androidx.media3.common.PlaybackParameters(savedSpeed, savedPitch)
-                            }
+                            // Speed/pitch are remembered per song and applied by the playback
+                            // service; just mirror what the player is using right now.
+                            _effectivePlaybackSpeed.value = controller.playbackParameters.speed
+                            _effectivePlaybackPitch.value = controller.playbackParameters.pitch
 
                             Log.d(TAG, "Initial repeat mode from controller: $controllerRepeatMode (${
                             when(controllerRepeatMode) {
@@ -4548,6 +4549,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         
+        override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
+            _effectivePlaybackSpeed.value = playbackParameters.speed
+            _effectivePlaybackPitch.value = playbackParameters.pitch
+        }
+
         override fun onRepeatModeChanged(repeatMode: Int) {
             Log.d(TAG, "Repeat mode changed: $repeatMode")
             _repeatMode.value = repeatMode
@@ -9538,13 +9544,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         appSettings.setAutoConnectDevice(enable)
     }
     
-    // Playback Speed Control
+    // Playback Speed Control (remembered per song)
     fun setPlaybackSpeed(speed: Float) {
         val clamped = speed.coerceIn(0.25f, 3.0f)
-        Log.d(TAG, "Setting playback speed to $clamped")
-        appSettings.setPlaybackSpeed(clamped)
-        val currentPitch = appSettings.playbackPitch.value.coerceIn(0.5f, 2.0f)
-        mediaController?.playbackParameters = androidx.media3.common.PlaybackParameters(clamped, currentPitch)
+        val pitch = (mediaController?.playbackParameters?.pitch ?: _effectivePlaybackPitch.value).coerceIn(0.5f, 2.0f)
+        Log.d(TAG, "Setting playback speed to $clamped for the current song")
+        applySongPlayback(clamped, pitch)
     }
 
     fun setDefaultPlaybackSpeed(speed: Float) {
@@ -9557,13 +9562,30 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         appSettings.setUseDefaultPlaybackSpeed(enabled)
     }
 
-    // Playback Pitch Control
+    // Playback Pitch Control (remembered per song)
     fun setPlaybackPitch(pitch: Float) {
         val clamped = pitch.coerceIn(0.5f, 2.0f)
-        Log.d(TAG, "Setting playback pitch to $clamped")
-        appSettings.setPlaybackPitch(clamped)
-        val currentSpeed = appSettings.playbackSpeed.value.coerceIn(0.25f, 3.0f)
-        mediaController?.playbackParameters = androidx.media3.common.PlaybackParameters(currentSpeed, clamped)
+        val speed = (mediaController?.playbackParameters?.speed ?: _effectivePlaybackSpeed.value).coerceIn(0.25f, 3.0f)
+        Log.d(TAG, "Setting playback pitch to $clamped for the current song")
+        applySongPlayback(speed, clamped)
+    }
+
+    /** Applies speed/pitch to the player and remembers them for the song that is playing. */
+    private fun applySongPlayback(speed: Float, pitch: Float) {
+        val songId = mediaController?.currentMediaItem?.mediaId ?: currentSong.value?.id
+        if (songId != null) {
+            val defaultSpeed = if (appSettings.useDefaultPlaybackSpeed.value) {
+                appSettings.defaultPlaybackSpeed.value
+            } else {
+                1.0f
+            }
+            chromahub.rhythm.app.infrastructure.service.SongPlaybackStore.save(
+                getApplication<android.app.Application>(), songId, speed, pitch, defaultSpeed, 1.0f
+            )
+        }
+        mediaController?.playbackParameters = androidx.media3.common.PlaybackParameters(speed, pitch)
+        _effectivePlaybackSpeed.value = speed
+        _effectivePlaybackPitch.value = pitch
     }
 
     // Enhanced play tracking with user preferences

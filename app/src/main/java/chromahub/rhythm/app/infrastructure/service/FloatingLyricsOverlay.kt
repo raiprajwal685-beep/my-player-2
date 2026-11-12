@@ -14,6 +14,7 @@ import android.graphics.Paint
 import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.text.TextUtils
 import android.os.Handler
 import android.os.Looper
@@ -44,6 +45,7 @@ import kotlin.math.abs
  */
 class FloatingLyricsOverlay(
     private val context: Context,
+    private val accessibilityMode: Boolean = false,
     private val onTap: () -> Unit,
     private val onClose: () -> Unit
 ) {
@@ -85,6 +87,9 @@ class FloatingLyricsOverlay(
 
     private fun dp(value: Int): Int = (value * density + 0.5f).toInt()
 
+    /** Position/size are remembered separately for the accessibility layer (different origin). */
+    private fun k(base: String): String = if (accessibilityMode) base + "_a11y" else base
+
     @SuppressLint("ClickableViewAccessibility")
     fun show() {
         if (root != null) return
@@ -98,21 +103,43 @@ class FloatingLyricsOverlay(
         val maxH = maxOf(minH, minOf(screenH, dp(MAX_HEIGHT_DP)))
 
         val defaultW = minOf(dp(DEFAULT_WIDTH_DP), screenW - dp(24))
-        val width = prefs.getInt(KEY_W, defaultW).coerceIn(minW, maxW)
-        val height = prefs.getInt(KEY_H, dp(DEFAULT_HEIGHT_DP)).coerceIn(minH, maxH)
-        val startX = prefs.getInt(KEY_X, (screenW - width) / 2).coerceIn(0, maxOf(0, screenW - width))
+        val width = prefs.getInt(k(KEY_W), defaultW).coerceIn(minW, maxW)
+        val height = prefs.getInt(k(KEY_H), dp(DEFAULT_HEIGHT_DP)).coerceIn(minH, maxH)
+        val startX = prefs.getInt(k(KEY_X), (screenW - width) / 2).coerceIn(0, maxOf(0, screenW - width))
         val statusBarId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
         val statusBar = if (statusBarId > 0) context.resources.getDimensionPixelSize(statusBarId) else dp(24)
-        val startY = prefs.getInt(KEY_Y, statusBar + dp(8)).coerceIn(0, maxOf(0, screenH - height))
+        val startY = prefs.getInt(k(KEY_Y), statusBar + dp(8)).coerceIn(0, maxOf(0, screenH - height))
 
+        // Accessibility layer: draws above system screens, and (with these flags) can extend over
+        // the status bar and the display cutout (notch).
+        val windowType = if (accessibilityMode) {
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        } else {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        }
+        var windowFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        if (accessibilityMode) {
+            windowFlags = windowFlags or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        }
         val lp = WindowManager.LayoutParams(
             width,
             height,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            windowType,
+            windowFlags,
             android.graphics.PixelFormat.TRANSLUCENT
         )
+        if (accessibilityMode) {
+            if (Build.VERSION.SDK_INT >= 30) {
+                lp.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            } else if (Build.VERSION.SDK_INT >= 28) {
+                lp.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
         lp.gravity = Gravity.TOP or Gravity.START
         lp.x = startX
         lp.y = startY
@@ -375,6 +402,7 @@ class FloatingLyricsOverlay(
 
         // How far through the line are we, in characters (fractional)?
         var chars = 0f
+        var pulse = 0f
         for (i in words.indices) {
             val w = words[i]
             if (positionMs >= w.end) {
@@ -383,6 +411,7 @@ class FloatingLyricsOverlay(
                 val span = (w.end - w.start).coerceAtLeast(1L)
                 val frac = (positionMs - w.start).toFloat() / span
                 chars = wordCharStarts[i] + frac * (wordCharEnds[i] - wordCharStarts[i])
+                pulse = kotlin.math.sin(kotlin.math.PI * frac).toFloat()
                 break
             } else {
                 break
@@ -407,6 +436,8 @@ class FloatingLyricsOverlay(
             floatArrayOf(0f, p, (p + soft).coerceAtMost(1f), 1f),
             Shader.TileMode.CLAMP
         )
+        // The glow swells while a word is being sung and relaxes between words.
+        tv.setShadowLayer(dp(GLOW_RADIUS_DP) * (1f + 0.7f * pulse), 0f, 0f, GLOW_COLOR)
         tv.invalidate()
     }
 
@@ -554,16 +585,16 @@ class FloatingLyricsOverlay(
 
     private fun savePosition() {
         val lp = layoutParams ?: return
-        prefs.edit().putInt(KEY_X, lp.x).putInt(KEY_Y, lp.y).apply()
+        prefs.edit().putInt(k(KEY_X), lp.x).putInt(k(KEY_Y), lp.y).apply()
     }
 
     private fun saveSize() {
         val lp = layoutParams ?: return
         prefs.edit()
-            .putInt(KEY_W, lp.width)
-            .putInt(KEY_H, lp.height)
-            .putInt(KEY_X, lp.x)
-            .putInt(KEY_Y, lp.y)
+            .putInt(k(KEY_W), lp.width)
+            .putInt(k(KEY_H), lp.height)
+            .putInt(k(KEY_X), lp.x)
+            .putInt(k(KEY_Y), lp.y)
             .apply()
     }
 
@@ -655,6 +686,21 @@ object AppVisibility {
     }
 
     fun isOpen(): Boolean = startedActivities > 0
+
+    // Activities that exist (even if stopped). With none left the app's ViewModel is gone, so the
+    // background service has to load lyrics itself.
+    @Volatile
+    private var aliveActivities = 0
+
+    fun onActivityCreated() {
+        aliveActivities++
+    }
+
+    fun onActivityDestroyed() {
+        if (aliveActivities > 0) aliveActivities--
+    }
+
+    fun hasAnyActivity(): Boolean = aliveActivities > 0
 }
 
 /** One word of the current lyric line with its timing (milliseconds). */

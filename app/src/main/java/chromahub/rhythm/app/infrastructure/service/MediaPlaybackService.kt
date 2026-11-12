@@ -95,6 +95,7 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     // Track current custom layout state to avoid unnecessary updates
     private var lastShuffleState: Boolean? = null
     private var lastRepeatMode: Int? = null
+    private var lastSpeedShown: Float = -1f
     private var lastFavoriteState: Boolean? = null
     private var lastWidgetSnapshotKey: String? = null
     private var lastHandledPlayerTransitionMediaId: String? = null
@@ -212,6 +213,7 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         currentPlainLyricsLines = emptyList()
         currentLyricIndex = -1
         setWordLines(null)
+        serviceLyricsRequestedFor = null
         chromahub.rhythm.app.infrastructure.widget.glance.GlanceWidgetUpdater.updateLyrics(this, emptyList(), -1)
     }
 
@@ -222,6 +224,7 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     private var overlayLastIndex: Int = -2
     private var overlayAppOpen = false
     private var overlayWordMode = false
+    private var overlayMode = 0
     private var overlayLastHeader: String? = null
     private var wordLineTexts: List<String> = emptyList()
     private var wordLineStamps: LongArray = longArrayOf()
@@ -230,19 +233,12 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
 
     private fun refreshFloatingLyrics() {
         if (!::appSettings.isInitialized) return
-        val allowed = appSettings.floatingLyricsEnabled.value &&
-            android.provider.Settings.canDrawOverlays(this)
-        if (!allowed) {
+        if (!appSettings.floatingLyricsEnabled.value) {
             stopFloatingLyrics()
             return
         }
-        if (floatingLyrics == null) {
-            floatingLyrics = FloatingLyricsOverlay(
-                context = this,
-                onTap = { openAppFromOverlay() },
-                onClose = { appSettings.setFloatingLyricsEnabled(false) }
-            )
-        }
+        // The ticker runs whenever the feature is on; it picks the usable window type
+        // (accessibility overlay, else "display over other apps") and (re)creates the window.
         if (floatingLyricsJob?.isActive != true) {
             floatingLyricsJob = serviceScope.launch {
                 while (true) {
@@ -252,6 +248,163 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
             }
         }
     }
+
+    // ---- Lyrics loading inside the service (works after the app screen is closed) ----------
+    private var serviceLyricsJob: Job? = null
+    private var serviceLyricsRequestedFor: String? = null
+    private val lyricsRepository by lazy {
+        chromahub.rhythm.app.features.local.data.repository.MusicRepository(applicationContext)
+    }
+
+    private fun loadLyricsInService(mediaItem: MediaItem?) {
+        val mediaId = mediaItem?.mediaId
+        if (mediaId != null && mediaId == serviceLyricsRequestedFor && serviceLyricsJob?.isActive == true) return
+        serviceLyricsJob?.cancel()
+        if (mediaId == null || !::appSettings.isInitialized || !::player.isInitialized) return
+        if (!appSettings.floatingLyricsEnabled.value || !appSettings.showLyrics.value) return
+        // While the app's own screens exist they load and push lyrics; step in only when none does.
+        if (AppVisibility.hasAnyActivity()) return
+        val extras = mediaItem.mediaMetadata.extras
+        val title = extras?.getString(METADATA_EXTRA_ORIGINAL_TITLE)
+            ?: mediaItem.mediaMetadata.title?.toString()
+            ?: return
+        val artist = extras?.getString(METADATA_EXTRA_ORIGINAL_ARTIST)
+            ?: mediaItem.mediaMetadata.artist?.toString().orEmpty()
+        serviceLyricsRequestedFor = mediaId
+        serviceLyricsJob = serviceScope.launch {
+            try {
+                val data = lyricsRepository.fetchLyrics(
+                    artist = artist,
+                    title = title,
+                    songId = mediaId,
+                    songUri = mediaItem.localConfiguration?.uri,
+                    sourcePreference = appSettings.lyricsSourcePreference.value
+                )
+                if (player.currentMediaItem?.mediaId != mediaId) return@launch
+                applyServiceLyrics(data)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Service lyrics load failed", e)
+            }
+        }
+    }
+
+    private fun applyServiceLyrics(data: chromahub.rhythm.app.shared.data.model.LyricsData?) {
+        val synced = data?.syncedLyrics
+        val lines = if (!synced.isNullOrBlank()) {
+            try {
+                chromahub.rhythm.app.util.LyricsParser.parseLyrics(synced)
+            } catch (e: Exception) {
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
+        currentLyricTexts = lines.map { it.text }
+        currentLyricTimestamps = lines.map { it.timestamp }.toLongArray()
+        currentLyricTranslations = emptyList()
+        currentLyricRomanizations = emptyList()
+        setWordLines(data?.wordByWordLyrics)
+    }
+
+    /** Rough word timings for lines that only have a line timestamp (spread by word length). */
+    private fun estimateWords(text: String, start: Long, end: Long): List<OverlayWord> {
+        val parts = text.trim().split(' ').filter { it.isNotEmpty() }
+        if (parts.isEmpty()) return emptyList()
+        val duration = (end - start).coerceIn(600L, 10_000L)
+        val active = (duration * 0.9).toLong()
+        val totalChars = parts.sumOf { it.length }.coerceAtLeast(1)
+        var t = start
+        val out = ArrayList<OverlayWord>(parts.size)
+        for (p in parts) {
+            val d = active * p.length / totalChars
+            out.add(OverlayWord(p, false, t, t + d))
+            t += d
+        }
+        return out
+    }
+
+    // ---- Resume-after-death: the service saves where playback is, since it outlives the UI ----
+    private var lastPersistedIndex = -1
+    private var lastPersistedPosition = -10_000L
+
+    private fun persistPlaybackState() {
+        if (!::player.isInitialized || !::appSettings.isInitialized) return
+        if (!appSettings.queuePersistenceEnabled.value) return
+        val id = player.currentMediaItem?.mediaId ?: return
+        val idx = player.currentMediaItemIndex
+        // Only touch the saved state when the player's queue is the one the app saved.
+        if (appSettings.savedQueue.value.getOrNull(idx) != id) return
+        if (idx != lastPersistedIndex) {
+            appSettings.setSavedQueueIndex(idx)
+            lastPersistedIndex = idx
+        }
+        val pos = player.currentPosition
+        if (kotlin.math.abs(pos - lastPersistedPosition) >= 1000L) {
+            appSettings.setSavedPlaybackPosition(pos)
+            lastPersistedPosition = pos
+        }
+    }
+
+    // ---- Per-song speed/pitch + the notification speed button --------------------------------
+    private fun defaultSpeedPitch(): Pair<Float, Float> {
+        val speed = if (appSettings.useDefaultPlaybackSpeed.value) {
+            appSettings.defaultPlaybackSpeed.value
+        } else {
+            1.0f
+        }
+        return Pair(speed, 1.0f)
+    }
+
+    private fun applySongPlaybackParameters(mediaId: String?) {
+        if (!::player.isInitialized || !::appSettings.isInitialized) return
+        val saved = mediaId?.let { SongPlaybackStore.get(this, it) }
+        val defaults = defaultSpeedPitch()
+        val speed = (saved?.speed ?: defaults.first).coerceIn(0.25f, 3.0f)
+        val pitch = (saved?.pitch ?: defaults.second).coerceIn(0.5f, 2.0f)
+        val current = player.playbackParameters
+        if (current.speed != speed || current.pitch != pitch) {
+            player.playbackParameters = androidx.media3.common.PlaybackParameters(speed, pitch)
+        }
+    }
+
+    private fun setSongPlayback(speed: Float, pitch: Float) {
+        val id = player.currentMediaItem?.mediaId
+        val defaults = defaultSpeedPitch()
+        if (id != null) SongPlaybackStore.save(this, id, speed, pitch, defaults.first, defaults.second)
+        player.playbackParameters = androidx.media3.common.PlaybackParameters(speed, pitch)
+    }
+
+    private fun cycleSpeedForCurrentSong() {
+        if (!::player.isInitialized) return
+        val presets = floatArrayOf(0.5f, 0.8f, 1.0f, 1.2f, 1.5f, 1.8f, 2.0f)
+        val current = player.playbackParameters
+        val next = presets.firstOrNull { it > current.speed + 0.02f } ?: presets.first()
+        setSongPlayback(next, current.pitch)
+    }
+
+    private fun liveSpeed(): Float =
+        if (::player.isInitialized) player.playbackParameters.speed else 1.0f
+
+    private fun buildSpeedCommand(speed: Float): CommandButton {
+        val icon = when {
+            speed < 0.65f -> CommandButton.ICON_PLAYBACK_SPEED_0_5
+            speed < 0.9f -> CommandButton.ICON_PLAYBACK_SPEED_0_8
+            speed < 1.1f -> CommandButton.ICON_PLAYBACK_SPEED_1_0
+            speed < 1.35f -> CommandButton.ICON_PLAYBACK_SPEED_1_2
+            speed < 1.65f -> CommandButton.ICON_PLAYBACK_SPEED_1_5
+            speed < 1.9f -> CommandButton.ICON_PLAYBACK_SPEED_1_8
+            else -> CommandButton.ICON_PLAYBACK_SPEED_2_0
+        }
+        return CommandButton.Builder(icon)
+            .setDisplayName("Speed " + String.format("%.2f", speed) + "x")
+            .setSessionCommand(SessionCommand(CYCLE_SPEED, Bundle.EMPTY))
+            .build()
+    }
+
+    private val speedCommand: CommandButton
+        get() = buildSpeedCommand(liveSpeed())
 
     private fun setWordLines(json: String?) {
         val lines = if (!json.isNullOrBlank()) {
@@ -278,8 +431,36 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     }
 
     private fun tickFloatingLyrics() {
-        val overlay = floatingLyrics ?: return
         if (!::player.isInitialized) return
+
+        // Window type: the accessibility overlay (above everything, incl. system screens and the
+        // notch) if that service is on, otherwise the normal "display over other apps" permission.
+        val accessibility = LyricsAccessibilityService.instance
+        val mode = when {
+            accessibility != null -> 2
+            android.provider.Settings.canDrawOverlays(this) -> 1
+            else -> 0
+        }
+        if (mode == 0) {
+            floatingLyrics?.hide()
+            floatingLyrics = null
+            overlayMode = 0
+            return
+        }
+        if (floatingLyrics == null || mode != overlayMode) {
+            floatingLyrics?.hide()
+            floatingLyrics = FloatingLyricsOverlay(
+                context = if (mode == 2 && accessibility != null) accessibility else this,
+                accessibilityMode = mode == 2,
+                onTap = { openAppFromOverlay() },
+                onClose = { appSettings.setFloatingLyricsEnabled(false) }
+            )
+            overlayMode = mode
+            overlayLastTexts = null
+            overlayLastIndex = -2
+            overlayLastHeader = null
+        }
+        val overlay = floatingLyrics ?: return
 
         // Hide while My Player's own screens are open; show again when they close.
         // Debounced (400 ms) so rotating the screen doesn't make the window flicker.
@@ -291,11 +472,11 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         }
         if (now - overlayAppOpenSince >= 400L) {
             if (appOpen && overlay.isShowing) overlay.hide()
-            if (!appOpen && !overlay.isShowing && android.provider.Settings.canDrawOverlays(this)) overlay.show()
+            if (!appOpen && !overlay.isShowing) overlay.show()
         }
         if (!overlay.isShowing) return
 
-        // Small "Title – Artist" line (the window only shows it when it is tall enough).
+        // Small "Title - Artist" line (the window only shows it when it is tall enough).
         val metadata = player.currentMediaItem?.mediaMetadata
         val header = listOfNotNull(metadata?.title?.toString(), metadata?.artist?.toString())
             .filter { it.isNotBlank() }
@@ -305,7 +486,15 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
             overlay.setHeader(header)
         }
 
-        // Prefer word-by-word lines when the song has them; otherwise plain line-by-line LRC.
+        // No app screen to load lyrics for us (e.g. after swiping the app away): load them here.
+        val currentId = player.currentMediaItem?.mediaId
+        if (currentId != null && currentId != serviceLyricsRequestedFor &&
+            currentLyricTexts.isEmpty() && wordLineTexts.isEmpty() && !AppVisibility.hasAnyActivity()
+        ) {
+            loadLyricsInService(player.currentMediaItem)
+        }
+
+        // Prefer real word-by-word lines; otherwise line-by-line LRC with estimated word timings.
         val usingWords = wordLineTexts.isNotEmpty()
         val texts: List<String> = if (usingWords) wordLineTexts else currentLyricTexts
         val stamps: LongArray = if (usingWords) wordLineStamps else currentLyricTimestamps
@@ -317,7 +506,7 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
                 if (stamps[i] <= lookahead) index = i
             }
         }
-        overlayWordMode = usingWords && index >= 0
+        overlayWordMode = index >= 0
 
         if (!(texts === overlayLastTexts && index == overlayLastIndex)) {
             overlayLastTexts = texts
@@ -327,11 +516,17 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
             } else if (index < 0) {
                 overlay.setLines(null, "\u266A", texts.firstOrNull())
             } else {
+                val words: List<OverlayWord>? = if (usingWords) {
+                    wordLineWords.getOrNull(index)
+                } else {
+                    val end = if (index + 1 < stamps.size) stamps[index + 1] else stamps[index] + 5000L
+                    estimateWords(texts[index], stamps[index], end).takeIf { it.isNotEmpty() }
+                }
                 overlay.setLines(
                     texts.getOrNull(index - 1),
-                    texts[index],
+                    if (!usingWords && words != null) joinOverlayWords(words) else texts[index],
                     texts.getOrNull(index + 1),
-                    if (usingWords) wordLineWords.getOrNull(index) else null
+                    words
                 )
             }
         }
@@ -348,6 +543,9 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         overlayAppOpen = false
         overlayAppOpenSince = 0L
         overlayLastHeader = null
+        overlayMode = 0
+        serviceLyricsJob?.cancel()
+        serviceLyricsJob = null
     }
 
     private fun openAppFromOverlay() {
@@ -731,6 +929,7 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         const val SHUFFLE_MODE_OFF = "shuffle_off"
         const val FAVORITE_ON = "favorite_on"
         const val FAVORITE_OFF = "favorite_off"
+        const val CYCLE_SPEED = "cycle_speed"
 
         private const val METADATA_EXTRA_ORIGINAL_TITLE = "chromahub.rhythm.app.extra.original_title"
         private const val METADATA_EXTRA_ORIGINAL_ARTIST = "chromahub.rhythm.app.extra.original_artist"
@@ -1432,6 +1631,14 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
         serviceScope.launch {
             appSettings.floatingLyricsEnabled.collect { refreshFloatingLyrics() }
         }
+
+        // Save the playback position every few seconds so a killed player can resume nearby.
+        serviceScope.launch {
+            while (true) {
+                delay(5000L)
+                if (::player.isInitialized && player.isPlaying) persistPlaybackState()
+            }
+        }
     }
 
     private inline fun <T> withEqualizerSafe(
@@ -1855,12 +2062,13 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
             val currentShuffleCommand = shuffleCommand
             val currentRepeatCommand = repeatCommand
             
-            mediaSession?.setCustomLayout(ImmutableList.of(currentShuffleCommand, currentRepeatCommand))
+            mediaSession?.setCustomLayout(ImmutableList.of(speedCommand, currentRepeatCommand))
             
             // Update state tracking after successful update
             lastShuffleState = liveShuffleEnabled()
             lastRepeatMode = liveRepeatMode()
             lastFavoriteState = isCurrentSongFavorite()
+            lastSpeedShown = liveSpeed()
             
             val currentMediaItem = player.currentMediaItem
             Log.d(TAG, "Updated custom layout - Song: ${currentMediaItem?.mediaMetadata?.title}, " +
@@ -1884,7 +2092,8 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
                 // Check if anything actually changed
                 if (currentShuffleState == lastShuffleState &&
                     currentRepeatMode == lastRepeatMode &&
-                    currentFavoriteState == lastFavoriteState) {
+                    currentFavoriteState == lastFavoriteState &&
+                    liveSpeed() == lastSpeedShown) {
                     Log.d(TAG, "Custom layout state unchanged, skipping update")
                     return
                 }
@@ -1893,13 +2102,14 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
                 lastShuffleState = currentShuffleState
                 lastRepeatMode = currentRepeatMode
                 lastFavoriteState = currentFavoriteState
+                lastSpeedShown = liveSpeed()
                 
                 val currentFavoriteCommand = getCurrentFavoriteCommand()
                 val currentShuffleCommand = shuffleCommand
                 val currentRepeatCommand = repeatCommand
                 
                 // Create the layout
-                session.setCustomLayout(ImmutableList.of(currentShuffleCommand, currentRepeatCommand))
+                session.setCustomLayout(ImmutableList.of(speedCommand, currentRepeatCommand))
                 
                 Log.d(TAG, "Smart updated custom layout - Favorite: $currentFavoriteState, " +
                           "Shuffle: $currentShuffleState, Repeat: $currentRepeatMode")
@@ -2600,6 +2810,7 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
     override fun onDestroy() {
         instanceForWidgetAndLyricsOnly = null
         Log.d(TAG, "Service being destroyed")
+        persistPlaybackState()
         stopFloatingLyrics()
 
         // Persist final playback position and index on destroy
@@ -2682,8 +2893,10 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
     
     @OptIn(UnstableApi::class)
     override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
-        // Let Media3 handle notification updates but ensure our icon is used
-        super.onUpdateNotification(session, startInForegroundRequired)
+        // Stay in the foreground even while paused (when something is queued) so Android is much
+        // less likely to kill the service; the notification then can't be swiped away.
+        val keepAlive = ::player.isInitialized && player.mediaItemCount > 0
+        super.onUpdateNotification(session, startInForegroundRequired || keepAlive)
     }
 
     private inner class MediaSessionCallback : MediaLibrarySession.Callback {
@@ -2704,6 +2917,7 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
                 }
             }
             availableCommands.add(SessionCommand("UPDATE_ACTIVE_LYRIC", Bundle.EMPTY))
+            availableCommands.add(SessionCommand(CYCLE_SPEED, Bundle.EMPTY))
             availableCommands.add(SessionCommand("UPDATE_LYRICS_DATA", Bundle.EMPTY))
             return MediaSession.ConnectionResult.accept(
                 availableCommands.build(),
@@ -2778,6 +2992,10 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
                         SessionResult(SessionResult.RESULT_SUCCESS)
                     }
 
+                    CYCLE_SPEED -> {
+                        cycleSpeedForCurrentSong()
+                        SessionResult(SessionResult.RESULT_SUCCESS)
+                    }
                     SHUFFLE_MODE_ON -> {
                         serviceController.shuffleModeEnabled = true
                         SessionResult(SessionResult.RESULT_SUCCESS)
@@ -2896,6 +3114,7 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
     override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
         super.onShuffleModeEnabledChanged(shuffleModeEnabled)
         Log.d(TAG, "Shuffle mode changed to: $shuffleModeEnabled")
+        if (appSettings.shuffleModePersistence.value) appSettings.setSavedShuffleState(shuffleModeEnabled)
 
         // Broadcast explicit shuffle state updates so UI can reconcile queue order immediately.
         val intent = Intent(ACTION_SHUFFLE_STATE_CHANGED).apply {
@@ -2913,6 +3132,7 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
     override fun onRepeatModeChanged(repeatMode: Int) {
         super<Player.Listener>.onRepeatModeChanged(repeatMode)
         Log.d(TAG, "Repeat mode changed to: $repeatMode")
+        if (appSettings.repeatModePersistence.value) appSettings.setSavedRepeatMode(repeatMode)
         // Use debounced update to prevent rapid UI changes
         scheduleCustomLayoutUpdate(100)
         // Keep home-screen widgets in sync (they were only refreshed on widget taps / track changes)
@@ -2961,6 +3181,11 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
         super.onMediaItemTransition(mediaItem, reason)
         clearLyricsState()
+        applySongPlaybackParameters(mediaItem?.mediaId)
+        loadLyricsInService(mediaItem)
+        // Not for PLAYLIST_CHANGED: while the app restores its saved queue the player briefly sits on
+        // the wrong item, and that must not overwrite the saved index/position.
+        if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) persistPlaybackState()
         val transitionMediaId = mediaItem?.mediaId
         if (
             reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED &&
@@ -2986,6 +3211,7 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
     override fun onIsPlayingChanged(isPlaying: Boolean) {
         super.onIsPlayingChanged(isPlaying)
         Log.d(TAG, "Is playing changed: $isPlaying")
+        if (!isPlaying) persistPlaybackState()
         // Update widget when play/pause state changes
         updateWidgetFromMediaItem(player.currentMediaItem)
     }
@@ -2993,12 +3219,8 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
     override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
         super.onPlaybackParametersChanged(playbackParameters)
         Log.d(TAG, "onPlaybackParametersChanged: speed=${playbackParameters.speed}, pitch=${playbackParameters.pitch}")
-        if (appSettings.playbackSpeed.value != playbackParameters.speed) {
-            appSettings.setPlaybackSpeed(playbackParameters.speed)
-        }
-        if (appSettings.playbackPitch.value != playbackParameters.pitch) {
-            appSettings.setPlaybackPitch(playbackParameters.pitch)
-        }
+        // Speed/pitch are remembered per song now, so don't overwrite the shared default here.
+        scheduleCustomLayoutUpdate(100)
     }
     
     /**
@@ -4133,6 +4355,7 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
         val shouldStopPlayback = appSettings.stopPlaybackOnAppClose.value
         
         Log.d(TAG, "onTaskRemoved called - stopPlaybackOnAppClose: $shouldStopPlayback")
+        persistPlaybackState()
         
         if (shouldStopPlayback) {
             // User wants playback to stop when app is closed

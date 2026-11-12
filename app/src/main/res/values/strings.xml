@@ -1,5 +1,6 @@
 <resources>
     <string name="app_name">My Player</string>
+    <string name="floating_lyrics_a11y_description" translatable="false">Lets My Player draw the floating lyrics window above all screens, including system screens and the notch. It does not read your screen.</string>
 <string name="home">Home</string>
     <string name="library">Library</string>
     <string name="search">Search</string>

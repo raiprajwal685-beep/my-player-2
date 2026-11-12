@@ -833,7 +833,8 @@ fun LyricsSettingsScreen(onBackClick: () -> Unit) {
                                 description = "Previous, current and next line in a draggable, resizable window over other apps. Needs lyrics enabled.",
                                 toggleState = floatingLyricsEnabled,
                                 onToggleChange = { enable ->
-                                    if (enable && !android.provider.Settings.canDrawOverlays(context)) {
+                                    if (enable && !android.provider.Settings.canDrawOverlays(context) &&
+                                        chromahub.rhythm.app.infrastructure.service.LyricsAccessibilityService.instance == null) {
                                         Toast.makeText(
                                             context,
                                             "Allow \"Display over other apps\" and floating lyrics will turn on by itself",
@@ -853,6 +854,25 @@ fun LyricsSettingsScreen(onBackClick: () -> Unit) {
                                         }
                                     } else {
                                         appSettings.setFloatingLyricsEnabled(enable)
+                                    }
+                                }
+                            )
+                        ),
+                        toMaterial3SettingsItem(
+                            context = context,
+                            hapticFeedback = hapticFeedback,
+                            item = SettingItem(
+                                icon = MaterialSymbolIcon("accessibility_new"),
+                                title = "Show over everything",
+                                description = "Optional. Uses Accessibility so the window can appear above Settings, the notification panel and the notch. Turn on \"My Player floating lyrics\" in Accessibility settings. If it is greyed out: App info > menu > Allow restricted settings.",
+                                onClick = {
+                                    try {
+                                        context.startActivity(
+                                            Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                                .apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                        )
+                                    } catch (e: Exception) {
+                                        Log.w("LyricsSettings", "Could not open accessibility settings", e)
                                     }
                                 }
                             )

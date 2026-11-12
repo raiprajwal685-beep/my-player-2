@@ -300,6 +300,21 @@
             android:authorities="${applicationId}.albumart"
             android:exported="true"
             android:grantUriPermissions="true" />
+
+        <!-- Optional: lets the floating lyrics window use the accessibility overlay layer (above
+             system screens and the notch). It listens to no events and reads no screen content. -->
+        <service
+            android:name=".infrastructure.service.LyricsAccessibilityService"
+            android:exported="true"
+            android:label="My Player floating lyrics"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/lyrics_accessibility_config" />
+        </service>
     </application>
 
 </manifest>

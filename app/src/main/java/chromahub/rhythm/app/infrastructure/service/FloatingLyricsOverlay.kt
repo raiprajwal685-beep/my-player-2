@@ -47,7 +47,11 @@ class FloatingLyricsOverlay(
     private val context: Context,
     private val accessibilityMode: Boolean = false,
     private val onTap: () -> Unit,
-    private val onClose: () -> Unit
+    private val onClose: () -> Unit,
+    private val onSpeedAdjust: (Float) -> Unit = {},
+    private val onSpeedReset: () -> Unit = {},
+    private val onPitchAdjust: (Float) -> Unit = {},
+    private val onPitchReset: () -> Unit = {}
 ) {
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -61,6 +65,16 @@ class FloatingLyricsOverlay(
     private var nextView: TextView? = null
     private var headerView: TextView? = null
     private var headerText: String = ""
+
+    // Fine speed/pitch controls: a small two-row panel in its own window next to the lyrics window
+    // (above it, or below it when there is no room), shown together with the corner buttons.
+    private var panelView: LinearLayout? = null
+    private var panelParams: WindowManager.LayoutParams? = null
+    private var panelAdded = false
+    private var speedLabelView: TextView? = null
+    private var pitchLabelView: TextView? = null
+    private var speedLabel: String = "Speed 1.00x"
+    private var pitchLabel: String = "Pitch 1.00"
 
     private var prevText: String = ""
     private var currentText: String = ""
@@ -81,6 +95,8 @@ class FloatingLyricsOverlay(
         controlsVisible = false
         closeView?.animate()?.alpha(0f)?.setDuration(350)?.start()
         gripView?.animate()?.alpha(0f)?.setDuration(350)?.start()
+        panelView?.animate()?.alpha(0f)?.setDuration(350)
+            ?.withEndAction { if (!controlsVisible) removePanel() }?.start()
     }
 
     val isShowing: Boolean get() = root != null
@@ -207,12 +223,16 @@ class FloatingLyricsOverlay(
         gripParams.setMargins(0, 0, dp(3), dp(3))
         container.addView(grip, gripParams)
 
-        // Drag the whole window; a tap without movement opens the app.
+        val panel = buildPanel()
+
+        // Drag the whole window. A tap opens the app, but only if the controls were already showing:
+        // the first tap just reveals them (so you can reach the speed pill).
         var downRawX = 0f
         var downRawY = 0f
         var originX = 0
         var originY = 0
         var dragging = false
+        var controlsWereVisible = true
         container.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -221,6 +241,7 @@ class FloatingLyricsOverlay(
                     originX = lp.x
                     originY = lp.y
                     dragging = false
+                    controlsWereVisible = controlsVisible
                     bg.setColor(EDIT_BG)
                     showControls()
                     true
@@ -240,7 +261,7 @@ class FloatingLyricsOverlay(
                 MotionEvent.ACTION_UP -> {
                     bg.setColor(IDLE_BG)
                     scheduleControlsFade()
-                    if (dragging) savePosition() else onTap()
+                    if (dragging) savePosition() else if (controlsWereVisible) onTap()
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
@@ -303,6 +324,7 @@ class FloatingLyricsOverlay(
         layoutParams = lp
         closeView = close
         gripView = grip
+        panelView = panel
         headerView = header
         prevView = prev
         currentView = cur
@@ -325,6 +347,10 @@ class FloatingLyricsOverlay(
         layoutParams = null
         closeView = null
         gripView = null
+        removePanel()
+        panelView = null
+        speedLabelView = null
+        pitchLabelView = null
         headerView = null
         prevView = null
         currentView = null
@@ -487,6 +513,173 @@ class FloatingLyricsOverlay(
         closeView?.alpha = 1f
         gripView?.animate()?.cancel()
         gripView?.alpha = 1f
+        panelView?.animate()?.cancel()
+        showPanel()
+    }
+
+    private fun windowTypeForMode(): Int =
+        if (accessibilityMode) {
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        } else {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        }
+
+    private fun windowFlagsForMode(): Int {
+        var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+        if (accessibilityMode) {
+            flags = flags or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        }
+        return flags
+    }
+
+    /** Two rows: "- Speed 1.05x +" and "- Pitch 1.00 +". Tap = 0.01 step, hold = repeat, tap the label = reset. */
+    private fun buildPanel(): LinearLayout {
+        val panel = LinearLayout(context)
+        panel.orientation = LinearLayout.VERTICAL
+        panel.gravity = Gravity.CENTER_HORIZONTAL
+        panel.setPadding(dp(4), dp(3), dp(4), dp(3))
+        panel.background = GradientDrawable().apply {
+            setColor(0xCC15171C.toInt())
+            cornerRadius = dp(18).toFloat()
+        }
+        panel.addView(makeControlRow(true))
+        panel.addView(makeControlRow(false))
+        return panel
+    }
+
+    private fun makeControlRow(isSpeed: Boolean): LinearLayout {
+        val row = LinearLayout(context)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        val minus = makeStepButton(IconView.MINUS, isSpeed, -0.01f)
+        val plus = makeStepButton(IconView.PLUS, isSpeed, 0.01f)
+        val label = TextView(context)
+        label.text = if (isSpeed) speedLabel else pitchLabel
+        label.setTextColor(Color.WHITE)
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+        label.typeface = Typeface.DEFAULT_BOLD
+        label.gravity = Gravity.CENTER
+        label.setOnClickListener {
+            if (isSpeed) onSpeedReset() else onPitchReset()
+            showControls()
+            scheduleControlsFade()
+        }
+        if (isSpeed) speedLabelView = label else pitchLabelView = label
+        row.addView(minus, LinearLayout.LayoutParams(dp(32), dp(32)))
+        row.addView(label, LinearLayout.LayoutParams(dp(86), dp(32)))
+        row.addView(plus, LinearLayout.LayoutParams(dp(32), dp(32)))
+        return row
+    }
+
+    private fun makeStepButton(kind: Int, isSpeed: Boolean, delta: Float): IconView {
+        val button = IconView(context, kind, density)
+        var repeater: Runnable? = null
+        val step = {
+            if (isSpeed) onSpeedAdjust(delta) else onPitchAdjust(delta)
+        }
+        button.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    showControls()
+                    step()
+                    val r = object : Runnable {
+                        override fun run() {
+                            step()
+                            showControls()
+                            mainHandler.postDelayed(this, 70L)
+                        }
+                    }
+                    repeater = r
+                    mainHandler.postDelayed(r, 450L)
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    repeater?.let { mainHandler.removeCallbacks(it) }
+                    repeater = null
+                    scheduleControlsFade()
+                    true
+                }
+                else -> true
+            }
+        }
+        return button
+    }
+
+    private fun showPanel() {
+        val panel = panelView ?: return
+        if (root == null) return
+        if (!panelAdded) {
+            val lp = WindowManager.LayoutParams(
+                dp(PANEL_WIDTH_DP),
+                dp(PANEL_HEIGHT_DP),
+                windowTypeForMode(),
+                windowFlagsForMode(),
+                android.graphics.PixelFormat.TRANSLUCENT
+            )
+            lp.gravity = Gravity.TOP or Gravity.START
+            panelParams = lp
+            positionPanel()
+            try {
+                windowManager.addView(panel, lp)
+                panelAdded = true
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not add speed/pitch panel", e)
+                return
+            }
+        }
+        panel.alpha = 1f
+    }
+
+    private fun removePanel() {
+        val panel = panelView ?: return
+        if (!panelAdded) return
+        try {
+            windowManager.removeView(panel)
+        } catch (e: Exception) {
+            Log.w(TAG, "removePanel failed", e)
+        }
+        panelAdded = false
+    }
+
+    /** Above the lyrics window, or below it when there is no room above. */
+    private fun positionPanel() {
+        val main = layoutParams ?: return
+        val lp = panelParams ?: return
+        val metrics = context.resources.displayMetrics
+        val pw = dp(PANEL_WIDTH_DP)
+        val ph = dp(PANEL_HEIGHT_DP)
+        val x = main.x + (main.width - pw) / 2
+        var y = main.y - ph - dp(4)
+        if (y < 0) y = main.y + main.height + dp(4)
+        lp.x = x.coerceIn(0, maxOf(0, metrics.widthPixels - pw))
+        lp.y = y.coerceIn(0, maxOf(0, metrics.heightPixels - ph))
+    }
+
+    private fun updatePanelLayout() {
+        if (!panelAdded) return
+        val panel = panelView ?: return
+        val lp = panelParams ?: return
+        positionPanel()
+        try {
+            windowManager.updateViewLayout(panel, lp)
+        } catch (e: Exception) {
+            Log.w(TAG, "updatePanelLayout failed", e)
+        }
+    }
+
+    /** Shows the current playback speed on the panel (e.g. Speed 1.05x). */
+    fun setSpeed(speed: Float) {
+        speedLabel = "Speed " + String.format("%.2f", speed) + "x"
+        speedLabelView?.text = speedLabel
+    }
+
+    /** Shows the current pitch on the panel (e.g. Pitch 1.00). */
+    fun setPitch(pitch: Float) {
+        pitchLabel = "Pitch " + String.format("%.2f", pitch)
+        pitchLabelView?.text = pitchLabel
     }
 
     private fun scheduleControlsFade() {
@@ -581,6 +774,7 @@ class FloatingLyricsOverlay(
         } catch (e: Exception) {
             Log.w(TAG, "updateViewLayout failed", e)
         }
+        updatePanelLayout()
     }
 
     private fun savePosition() {
@@ -617,7 +811,13 @@ class FloatingLyricsOverlay(
             super.onDraw(canvas)
             val w = width.toFloat()
             val h = height.toFloat()
-            if (kind == CLOSE) {
+            if (kind == MINUS || kind == PLUS) {
+                val m = w * 0.3f
+                canvas.drawLine(m, h / 2f, w - m, h / 2f, underlay)
+                if (kind == PLUS) canvas.drawLine(w / 2f, m, w / 2f, h - m, underlay)
+                canvas.drawLine(m, h / 2f, w - m, h / 2f, paint)
+                if (kind == PLUS) canvas.drawLine(w / 2f, m, w / 2f, h - m, paint)
+            } else if (kind == CLOSE) {
                 val m = w * 0.3f
                 canvas.drawLine(m, m, w - m, h - m, underlay)
                 canvas.drawLine(w - m, m, m, h - m, underlay)
@@ -634,6 +834,8 @@ class FloatingLyricsOverlay(
         companion object {
             const val CLOSE = 0
             const val GRIP = 1
+            const val MINUS = 2
+            const val PLUS = 3
         }
     }
 
@@ -656,6 +858,8 @@ class FloatingLyricsOverlay(
         const val SIDE_PADDING_DP = 28
         const val GLOW_RADIUS_DP = 10
         const val CONTROLS_FADE_DELAY_MS = 3000L
+        const val PANEL_WIDTH_DP = 158
+        const val PANEL_HEIGHT_DP = 70
         const val SLIDE_DISTANCE_DP = 18
         const val SLIDE_DURATION_MS = 240L
         const val IDLE_BG = 0x00000000

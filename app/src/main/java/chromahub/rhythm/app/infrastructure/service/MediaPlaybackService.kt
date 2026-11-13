@@ -225,6 +225,8 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     private var overlayAppOpen = false
     private var overlayWordMode = false
     private var overlayMode = 0
+    private var overlayLastSpeed = -1f
+    private var overlayLastPitch = -1f
     private var overlayLastHeader: String? = null
     private var wordLineTexts: List<String> = emptyList()
     private var wordLineStamps: LongArray = longArrayOf()
@@ -376,6 +378,32 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         player.playbackParameters = androidx.media3.common.PlaybackParameters(speed, pitch)
     }
 
+    /** Fine speed control from the floating window (0.01x steps), remembered for this song. */
+    private fun adjustSpeedForCurrentSong(delta: Float) {
+        if (!::player.isInitialized) return
+        val current = player.playbackParameters
+        val next = (kotlin.math.round((current.speed + delta) * 100f) / 100f).coerceIn(0.25f, 3.0f)
+        if (next != current.speed) setSongPlayback(next, current.pitch)
+    }
+
+    /** Fine pitch control from the floating window (0.01 steps), remembered for this song. */
+    private fun adjustPitchForCurrentSong(delta: Float) {
+        if (!::player.isInitialized) return
+        val current = player.playbackParameters
+        val next = (kotlin.math.round((current.pitch + delta) * 100f) / 100f).coerceIn(0.5f, 2.0f)
+        if (next != current.pitch) setSongPlayback(current.speed, next)
+    }
+
+    private fun resetPitchForCurrentSong() {
+        if (!::player.isInitialized) return
+        setSongPlayback(player.playbackParameters.speed, defaultSpeedPitch().second)
+    }
+
+    private fun resetSpeedForCurrentSong() {
+        if (!::player.isInitialized) return
+        setSongPlayback(defaultSpeedPitch().first, player.playbackParameters.pitch)
+    }
+
     private fun cycleSpeedForCurrentSong() {
         if (!::player.isInitialized) return
         val presets = floatArrayOf(0.5f, 0.8f, 1.0f, 1.2f, 1.5f, 1.8f, 2.0f)
@@ -453,8 +481,14 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
                 context = if (mode == 2 && accessibility != null) accessibility else this,
                 accessibilityMode = mode == 2,
                 onTap = { openAppFromOverlay() },
-                onClose = { appSettings.setFloatingLyricsEnabled(false) }
+                onClose = { appSettings.setFloatingLyricsEnabled(false) },
+                onSpeedAdjust = { adjustSpeedForCurrentSong(it) },
+                onSpeedReset = { resetSpeedForCurrentSong() },
+                onPitchAdjust = { adjustPitchForCurrentSong(it) },
+                onPitchReset = { resetPitchForCurrentSong() }
             )
+            overlayLastSpeed = -1f
+            overlayLastPitch = -1f
             overlayMode = mode
             overlayLastTexts = null
             overlayLastIndex = -2
@@ -484,6 +518,18 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         if (header != overlayLastHeader) {
             overlayLastHeader = header
             overlay.setHeader(header)
+        }
+
+        // Current playback speed on the pill
+        val speedNow = player.playbackParameters.speed
+        if (speedNow != overlayLastSpeed) {
+            overlayLastSpeed = speedNow
+            overlay.setSpeed(speedNow)
+        }
+        val pitchNow = player.playbackParameters.pitch
+        if (pitchNow != overlayLastPitch) {
+            overlayLastPitch = pitchNow
+            overlay.setPitch(pitchNow)
         }
 
         // No app screen to load lyrics for us (e.g. after swiping the app away): load them here.
@@ -543,6 +589,8 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
         overlayAppOpen = false
         overlayAppOpenSince = 0L
         overlayLastHeader = null
+        overlayLastSpeed = -1f
+        overlayLastPitch = -1f
         overlayMode = 0
         serviceLyricsJob?.cancel()
         serviceLyricsJob = null

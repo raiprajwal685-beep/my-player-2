@@ -4724,40 +4724,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         song: Song,
         lyricLine: String?
     ) {
-        if (song.id == lastAppliedBluetoothLyricSongId && lyricLine == lastAppliedBluetoothLyricLine) {
-            return
-        }
-
-        try {
-            val currentIndex = controller.currentMediaItemIndex
-            if (currentIndex == C.INDEX_UNSET || currentIndex !in 0 until controller.mediaItemCount) {
-                return
-            }
-
-            val currentItem = controller.getMediaItemAt(currentIndex)
-            if (currentItem.mediaId != song.id) {
-                return
-            }
-
-            val updatedMetadata = currentItem.mediaMetadata
-                .buildUpon()
-                .setTitle(lyricLine?.takeIf { it.isNotBlank() } ?: DEFAULT_BLUETOOTH_LYRIC_LINE)
-                .setArtist(mergeSongTitleAndArtist(song))
-                .setAlbumTitle(song.album)
-                .setArtworkUri(song.artworkUri ?: currentItem.mediaMetadata.artworkUri)
-                .setExtras(buildCanonicalMetadataExtras(song, currentItem.mediaMetadata.extras))
-                .build()
-
-            val updatedItem = currentItem.buildUpon()
-                .setMediaMetadata(updatedMetadata)
-                .build()
-
-            controller.replaceMediaItem(currentIndex, updatedItem)
-            lastAppliedBluetoothLyricSongId = song.id
-            lastAppliedBluetoothLyricLine = lyricLine
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to apply Bluetooth lyrics metadata to current media item", e)
-        }
+        // Intentionally does nothing: writing the current lyric line into the title and "title - artist"
+        // into the artist made the media notification show lyrics where the song title belongs.
+        // (Status broadcasts for car displays are unchanged.)
     }
 
     private fun restoreStandardNowPlayingMetadata(controller: MediaController, song: Song?) {

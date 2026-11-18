@@ -1201,6 +1201,7 @@ class MainActivity : AppCompatActivity() {
         Log.d(TAG, "MainActivity onResume: refreshing audio devices")
         musicViewModel.refreshAudioDevices()
         maybeRequestBatteryOptimizationExemption()
+        chromahub.rhythm.app.features.visualizer.engine.VisualizerHub.refresh()
 
         // Came back from the "Display over other apps" screen after tapping the floating lyrics
         // toggle: switch the feature on now if the permission was granted.

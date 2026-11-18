@@ -66,6 +66,11 @@ class FloatingLyricsOverlay(
     private var headerView: TextView? = null
     private var headerText: String = ""
 
+    private var visualizerView: chromahub.rhythm.app.features.visualizer.ui.VisualizerView? = null
+    private var visualizerEnabled: Boolean = false
+    private var visualizerConfig: chromahub.rhythm.app.features.visualizer.data.VisualizerConfig =
+        chromahub.rhythm.app.features.visualizer.data.VisualizerConfig()
+
     // Fine speed/pitch controls: a small two-row panel in its own window next to the lyrics window
     // (above it, or below it when there is no room), shown together with the corner buttons.
     private var panelView: LinearLayout? = null
@@ -85,6 +90,7 @@ class FloatingLyricsOverlay(
     private var wordCharStarts = IntArray(0)
     private var wordCharEnds = IntArray(0)
     private var lastWordPos = -1L
+    private var lastGlowLevel = -1
 
     // Corner buttons (close / resize) fade out a few seconds after the last touch.
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -134,7 +140,8 @@ class FloatingLyricsOverlay(
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         }
         var windowFlags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
         if (accessibilityMode) {
             windowFlags = windowFlags or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
@@ -170,6 +177,15 @@ class FloatingLyricsOverlay(
         container.background = bg
         container.clipChildren = false
         container.clipToPadding = false
+
+        // Audio visualizer behind the lyric lines (off unless enabled in the visualizer settings).
+        val viz = chromahub.rhythm.app.features.visualizer.ui.VisualizerView(context)
+        viz.config = visualizerConfig
+        viz.visibility = if (visualizerEnabled) View.VISIBLE else View.GONE
+        container.addView(
+            viz,
+            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        )
 
         val column = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -324,6 +340,7 @@ class FloatingLyricsOverlay(
         layoutParams = lp
         closeView = close
         gripView = grip
+        visualizerView = viz
         panelView = panel
         headerView = header
         prevView = prev
@@ -347,6 +364,7 @@ class FloatingLyricsOverlay(
         layoutParams = null
         closeView = null
         gripView = null
+        visualizerView = null
         removePanel()
         panelView = null
         speedLabelView = null
@@ -379,6 +397,7 @@ class FloatingLyricsOverlay(
         currentWords = words?.takeIf { it.isNotEmpty() }
         computeWordOffsets()
         lastWordPos = -1L
+        lastGlowLevel = -1
         if (root == null) return
         renderTexts()
         if (currentWords == null) currentView?.paint?.shader = null
@@ -462,8 +481,13 @@ class FloatingLyricsOverlay(
             floatArrayOf(0f, p, (p + soft).coerceAtMost(1f), 1f),
             Shader.TileMode.CLAMP
         )
-        // The glow swells while a word is being sung and relaxes between words.
-        tv.setShadowLayer(dp(GLOW_RADIUS_DP) * (1f + 0.7f * pulse), 0f, 0f, GLOW_COLOR)
+        // The glow swells while a word is being sung and relaxes between words, in a few steps
+        // only: re-drawing a blurred shadow is the expensive part.
+        val glowLevel = (pulse * 4f).toInt()
+        if (glowLevel != lastGlowLevel) {
+            lastGlowLevel = glowLevel
+            tv.setShadowLayer(dp(GLOW_RADIUS_DP) * (1f + 0.7f * glowLevel / 4f), 0f, 0f, GLOW_COLOR)
+        }
         tv.invalidate()
     }
 
@@ -526,7 +550,8 @@ class FloatingLyricsOverlay(
 
     private fun windowFlagsForMode(): Int {
         var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
         if (accessibilityMode) {
             flags = flags or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
@@ -667,6 +692,16 @@ class FloatingLyricsOverlay(
             windowManager.updateViewLayout(panel, lp)
         } catch (e: Exception) {
             Log.w(TAG, "updatePanelLayout failed", e)
+        }
+    }
+
+    /** Turns the visualizer behind the lyrics on/off and updates how it looks. */
+    fun setVisualizer(enabled: Boolean, config: chromahub.rhythm.app.features.visualizer.data.VisualizerConfig) {
+        visualizerEnabled = enabled
+        visualizerConfig = config
+        visualizerView?.let {
+            it.config = config
+            it.visibility = if (enabled) View.VISIBLE else View.GONE
         }
     }
 

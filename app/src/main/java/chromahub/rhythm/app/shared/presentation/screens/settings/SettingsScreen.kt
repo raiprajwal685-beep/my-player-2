@@ -181,6 +181,7 @@ object SettingsRoutes {
     const val QUEUE = "queue_settings"
     const val PLAYBACK = "playback_settings"
     const val LYRICS = "lyrics_settings"
+    const val VISUALIZER = "visualizer_settings"
     const val WIDGET = "widget_settings"
     const val HOME_SCREEN = "home_screen_settings"
     const val GESTURES = "gestures_settings"
@@ -373,6 +374,13 @@ fun SettingsScreen(
                         description = context.getString(R.string.playback_lyrics_priority_desc),
                         palette = SettingsPalettes.Cyan,
                         onClick = { onNavigateTo(SettingsRoutes.LYRICS) }
+                    ))
+                    add(SettingItem(
+                        icon = MaterialSymbolIcon("graphic_eq"),
+                        title = "Visualizer",
+                        description = "Live audio spectrum: styles, colors, presets",
+                        palette = SettingsPalettes.Coral,
+                        onClick = { onNavigateTo(SettingsRoutes.VISUALIZER) }
                     ))
                     add(SettingItem(
                         icon = MaterialSymbolIcon("speed"),
@@ -1197,6 +1205,7 @@ fun SettingsScreenWrapper(
                             onNavigateTo = onNavigateToSubsetting
                         )
                         SettingsRoutes.LYRICS -> LyricsSettingsScreen(onBackClick = handleBack)
+                        SettingsRoutes.VISUALIZER -> VisualizerSettingsScreen(onBackClick = handleBack)
                         SettingsRoutes.WIDGET -> WidgetSettingsScreen(onBackClick = handleBack)
                         SettingsRoutes.HOME_SCREEN -> HomeScreenCustomizationSettingsScreen(onBackClick = handleBack)
                         SettingsRoutes.GESTURES -> GesturesSettingsScreen(onBackClick = handleBack)
@@ -1352,6 +1361,7 @@ fun SettingsScreenWrapper(
                     onNavigateTo = onNavigateToSubsetting
                 )
                 SettingsRoutes.LYRICS -> LyricsSettingsScreen(onBackClick = handleBack)
+                SettingsRoutes.VISUALIZER -> VisualizerSettingsScreen(onBackClick = handleBack)
                 SettingsRoutes.WIDGET -> WidgetSettingsScreen(onBackClick = handleBack)
                 SettingsRoutes.HOME_SCREEN -> HomeScreenCustomizationSettingsScreen(onBackClick = handleBack)
                 SettingsRoutes.GESTURES -> GesturesSettingsScreen(onBackClick = handleBack)

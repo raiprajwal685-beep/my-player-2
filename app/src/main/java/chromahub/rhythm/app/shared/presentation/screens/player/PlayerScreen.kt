@@ -28,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import chromahub.rhythm.app.features.visualizer.ui.PlayerVisualizerOverlay
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.navigation.NavController
@@ -919,6 +920,9 @@ fun PlayerScreen(
             modifier = modifier
         )
     }
+
+    // Audio visualizer (only drawn when enabled in Settings > Visualizer)
+    PlayerVisualizerOverlay()
 
     AnimatedVisibility(
         visible = showFullScreenLyrics,

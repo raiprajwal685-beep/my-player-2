@@ -227,6 +227,7 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     private var overlayMode = 0
     private var overlayLastSpeed = -1f
     private var overlayLastPitch = -1f
+    private var overlayLastVisualizer: chromahub.rhythm.app.features.visualizer.data.VisualizerState? = null
     private var overlayLastHeader: String? = null
     private var wordLineTexts: List<String> = emptyList()
     private var wordLineStamps: LongArray = longArrayOf()
@@ -254,6 +255,7 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
     // ---- Lyrics loading inside the service (works after the app screen is closed) ----------
     private var serviceLyricsJob: Job? = null
     private var serviceLyricsRequestedFor: String? = null
+    private var lastLyricsTransitionId: String? = null
     private val lyricsRepository by lazy {
         chromahub.rhythm.app.features.local.data.repository.MusicRepository(applicationContext)
     }
@@ -489,12 +491,20 @@ class MediaPlaybackService : MediaLibraryService(), Player.Listener {
             )
             overlayLastSpeed = -1f
             overlayLastPitch = -1f
+            overlayLastVisualizer = null
             overlayMode = mode
             overlayLastTexts = null
             overlayLastIndex = -2
             overlayLastHeader = null
         }
         val overlay = floatingLyrics ?: return
+
+        // Visualizer behind the lyrics: follow the visualizer settings
+        val vs = chromahub.rhythm.app.features.visualizer.data.VisualizerSettings.state.value
+        if (vs !== overlayLastVisualizer) {
+            overlayLastVisualizer = vs
+            overlay.setVisualizer(vs.masterEnabled && vs.showInOverlay, vs.working)
+        }
 
         // Hide while My Player's own screens are open; show again when they close.
         // Debounced (400 ms) so rotating the screen doesn't make the window flicker.
@@ -1680,6 +1690,9 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
             appSettings.floatingLyricsEnabled.collect { refreshFloatingLyrics() }
         }
 
+        // Audio visualizer: load its settings and start listening for the audio session
+        chromahub.rhythm.app.features.visualizer.engine.VisualizerHub.init(applicationContext)
+
         // Save the playback position every few seconds so a killed player can resume nearby.
         serviceScope.launch {
             while (true) {
@@ -2110,7 +2123,7 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
             val currentShuffleCommand = shuffleCommand
             val currentRepeatCommand = repeatCommand
             
-            mediaSession?.setCustomLayout(ImmutableList.of(speedCommand, currentRepeatCommand))
+            mediaSession?.setCustomLayout(ImmutableList.of(speedCommand))
             
             // Update state tracking after successful update
             lastShuffleState = liveShuffleEnabled()
@@ -2157,7 +2170,7 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
                 val currentRepeatCommand = repeatCommand
                 
                 // Create the layout
-                session.setCustomLayout(ImmutableList.of(speedCommand, currentRepeatCommand))
+                session.setCustomLayout(ImmutableList.of(speedCommand))
                 
                 Log.d(TAG, "Smart updated custom layout - Favorite: $currentFavoriteState, " +
                           "Shuffle: $currentShuffleState, Repeat: $currentRepeatMode")
@@ -3228,9 +3241,16 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
         super.onMediaItemTransition(mediaItem, reason)
-        clearLyricsState()
-        applySongPlaybackParameters(mediaItem?.mediaId)
-        loadLyricsInService(mediaItem)
+        // Repeat (one/all of a single song) and metadata-only updates keep the same song, so keep its
+        // lyrics and speed/pitch instead of wiping and reloading them on every loop.
+        val lyricsTransitionId = mediaItem?.mediaId
+        val sameItemAsBefore = lyricsTransitionId != null && lyricsTransitionId == lastLyricsTransitionId
+        if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT && !sameItemAsBefore) {
+            clearLyricsState()
+            applySongPlaybackParameters(lyricsTransitionId)
+            loadLyricsInService(mediaItem)
+        }
+        lastLyricsTransitionId = lyricsTransitionId
         // Not for PLAYLIST_CHANGED: while the app restores its saved queue the player briefly sits on
         // the wrong item, and that must not overwrite the saved index/position.
         if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) persistPlaybackState()
@@ -3887,6 +3907,8 @@ notificationManager.createNotificationChannel(sleepTimerChannel)
             Log.w(TAG, "Invalid audio session ID (0), skipping effects initialization")
             return
         }
+        // Tell the visualizer which audio session is playing (also called after crossfade swaps)
+        chromahub.rhythm.app.features.visualizer.engine.VisualizerHub.setAudioSessionId(requestedSessionId)
 
         pendingAudioEffectsSessionId = requestedSessionId
 

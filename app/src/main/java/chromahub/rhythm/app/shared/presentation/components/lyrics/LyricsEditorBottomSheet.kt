@@ -187,7 +187,8 @@ fun LyricsEditorBottomSheet(
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     
-    var selectedFormat by remember(lyricsData) {
+    // Keep the user's selected editor mode when lyrics are refreshed for the same song.
+    var selectedFormat by remember(song?.id) {
         mutableStateOf(
             if (lyricsData?.wordByWordLyrics?.isNotBlank() == true) LyricFormat.WORD_BY_WORD
             else if (lyricsData?.syncedLyrics?.isNotBlank() == true) LyricFormat.LINE_BY_LINE
@@ -407,9 +408,14 @@ fun LyricsEditorBottomSheet(
     fun applyLoadedLyrics(loadedLyrics: String) {
         val loadedTrimmed = loadedLyrics.trim()
         
-        val isWordByWordJson = (loadedTrimmed.startsWith("[") || loadedTrimmed.startsWith("{")) && 
-            (loadedTrimmed.contains("\"timestamp\"") || loadedTrimmed.contains("\"words\""))
-            
+        val parsedWordByWord = if (loadedTrimmed.startsWith("[") || loadedTrimmed.startsWith("{")) {
+            runCatching { RhythmLyricsParser.parseWordByWordLyrics(loadedLyrics) }
+                .getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        val isWordByWordJson = parsedWordByWord.isNotEmpty()
+
         val isLrc = loadedLyrics.contains(Regex("\\[\\d{2}:\\d{2}\\.\\d{2,3}]"))
 
         val isTtml = loadedTrimmed.startsWith("<") && (
@@ -421,14 +427,11 @@ fun LyricsEditorBottomSheet(
         )
         
         if (isWordByWordJson) {
-            editedWordByWord = loadedLyrics
+            // Keep the original document in Source, but normalize supported JSON schemas
+            // into the app's canonical word-by-word format for rendering and embedding.
+            editedWordByWord = RhythmLyricsParser.toWordByWordJson(parsedWordByWord)
             editedSource = loadedLyrics
-            try {
-                val parsed = RhythmLyricsParser.parseWordByWordLyrics(loadedLyrics)
-                editedLineByLine = RhythmLyricsParser.toLRCFormat(parsed)
-            } catch (_: Exception) {
-                editedLineByLine = ""
-            }
+            editedLineByLine = RhythmLyricsParser.toLRCFormat(parsedWordByWord)
             selectedFormat = LyricFormat.WORD_BY_WORD
         } else if (isTtml) {
             val parsedLines = RhythmLyricsParser.parseTtmlLyrics(loadedLyrics)

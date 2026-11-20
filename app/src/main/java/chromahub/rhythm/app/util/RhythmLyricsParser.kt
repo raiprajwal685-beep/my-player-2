@@ -9,6 +9,8 @@ import android.util.Log
 import chromahub.rhythm.app.network.RhythmLyricsLine
 import chromahub.rhythm.app.network.RhythmLyricsWord
 import com.google.gson.Gson
+import com.google.gson.JsonArray
+import com.google.gson.JsonParser
 import com.google.gson.reflect.TypeToken
 import org.xmlpull.v1.XmlPullParser
 import java.io.StringReader
@@ -47,10 +49,74 @@ object RhythmLyricsParser {
     * @param jsonContent JSON string containing word-by-word lyrics data
      * @return List of parsed word-level lyrics, or empty if parsing fails
      */
+    private fun parseFlatWordTimingJson(array: JsonArray): List<WordByWordLyricLine> {
+        data class TimedWord(
+            val lineIndex: Int,
+            val text: String,
+            val startMs: Long,
+            val endMs: Long
+        )
+
+        val timedWords = array.mapNotNull { element ->
+            if (!element.isJsonObject) return@mapNotNull null
+            val item = element.asJsonObject
+            val word = item.get("word")?.takeIf { !it.isJsonNull }?.asString?.trim().orEmpty()
+            val startSeconds = item.get("start")?.takeIf { !it.isJsonNull }?.let {
+                runCatching { it.asDouble }.getOrNull()
+            } ?: return@mapNotNull null
+            val endSeconds = item.get("end")?.takeIf { !it.isJsonNull }?.let {
+                runCatching { it.asDouble }.getOrNull()
+            } ?: return@mapNotNull null
+            if (word.isBlank() || !startSeconds.isFinite() || !endSeconds.isFinite()) {
+                return@mapNotNull null
+            }
+            val lineIndex = item.get("line_index")?.takeIf { !it.isJsonNull }?.let {
+                runCatching { it.asInt }.getOrNull()
+            } ?: 0
+            TimedWord(
+                lineIndex = lineIndex,
+                text = word,
+                startMs = (startSeconds * 1000.0).toLong().coerceAtLeast(0L),
+                endMs = (endSeconds * 1000.0).toLong().coerceAtLeast(0L)
+            )
+        }
+
+        return timedWords
+            .groupBy { it.lineIndex }
+            .toSortedMap()
+            .values
+            .mapNotNull { lineWords ->
+                val sortedWords = lineWords.sortedBy { it.startMs }
+                if (sortedWords.isEmpty()) return@mapNotNull null
+                WordByWordLyricLine(
+                    words = sortedWords.map { word ->
+                        WordByWordWord(
+                            text = word.text,
+                            isPart = false,
+                            timestamp = word.startMs,
+                            endtime = maxOf(word.endMs, word.startMs)
+                        )
+                    },
+                    lineTimestamp = sortedWords.minOf { it.startMs },
+                    lineEndtime = sortedWords.maxOf { maxOf(it.endMs, it.startMs) }
+                )
+            }
+    }
+
     fun parseWordByWordLyrics(jsonContent: String): List<WordByWordLyricLine> {
         if (jsonContent.isBlank()) return emptyList()
-        
+
         return try {
+            val root = JsonParser.parseString(jsonContent)
+            if (root.isJsonArray && root.asJsonArray.any { element ->
+                    element.isJsonObject &&
+                        element.asJsonObject.has("word") &&
+                        element.asJsonObject.has("start") &&
+                        element.asJsonObject.has("end")
+                }) {
+                return parseFlatWordTimingJson(root.asJsonArray)
+            }
+
             val gson = Gson()
             val listType = object : TypeToken<List<RhythmLyricsLine>>() {}.type
             val rhythmLyricsLines: List<RhythmLyricsLine> = gson.fromJson(jsonContent, listType)

@@ -208,8 +208,19 @@ fun WordByWordLyricsView(
     // Find current line index (among lyric lines only) - using adjustedPlaybackTime for sync offset
     val currentLineIndex by remember(adjustedPlaybackTime, visibleLyricsLines) {
         derivedStateOf {
-            val lastIndexAtPlayback = visibleLyricsLines.indexOfLast { line ->
-                adjustedPlaybackTime >= line.lineTimestamp
+            // The playback clock updates frequently. Binary-search the timestamp-sorted
+            // lines instead of scanning the entire lyric document on every clock tick.
+            var low = 0
+            var high = visibleLyricsLines.lastIndex
+            var lastIndexAtPlayback = -1
+            while (low <= high) {
+                val mid = (low + high) ushr 1
+                if (visibleLyricsLines[mid].lineTimestamp <= adjustedPlaybackTime) {
+                    lastIndexAtPlayback = mid
+                    low = mid + 1
+                } else {
+                    high = mid - 1
+                }
             }
 
             if (lastIndexAtPlayback < 0) {
@@ -287,7 +298,7 @@ fun WordByWordLyricsView(
                         targetIndex = targetItemIndex.coerceIn(0, lyricsItems.lastIndex),
                         scrollOffset = -offset,
                         lastIndex = lyricsItems.lastIndex,
-                        noAnimation = lyricNoAnimationVal
+                        noAnimation = lyricNoAnimationVal || listState.isScrollInProgress
                     )
                 }
             }

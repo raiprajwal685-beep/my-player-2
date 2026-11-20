@@ -227,7 +227,10 @@ fun PlayerScreen(
     ) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
             musicViewModel.completeLyricsWriteAfterPermission(
-                onSuccess = { },
+                onSuccess = {
+                    // Permission-granted writes must refresh the same lyrics cache as direct writes.
+                    musicViewModel.clearLyricsCacheAndRefetch()
+                },
                 onError = { errorMessage ->
                     Toast.makeText(context, errorMessage, Toast.LENGTH_LONG).show()
                 }
@@ -983,6 +986,11 @@ fun PlayerScreen(
             onEmbedInFile = { editedLyrics ->
                 musicViewModel.embedLyricsInFile(
                     lyrics = editedLyrics,
+                    onSuccess = {
+                        // Re-read the audio metadata so the editor and player do not retain
+                        // the pre-embed lyrics snapshot.
+                        musicViewModel.clearLyricsCacheAndRefetch()
+                    },
                     onPermissionRequired = { pendingRequest ->
                         try {
                             val intentSenderRequest = androidx.activity.result.IntentSenderRequest.Builder(

@@ -233,7 +233,9 @@ fun LyricsEditorBottomSheet(
     }
 
     fun onlineExportContent(): String = when (selectedExportFormat) {
-        OnlineExportFormat.LRC, OnlineExportFormat.ELRC -> editedLineByLine
+        OnlineExportFormat.LRC -> editedLineByLine.lines()
+            .joinToString("\n") { line -> line.replace(Regex("""<\d{1,2}:\d{2}\.\d{2,3}>"""), "") }
+        OnlineExportFormat.ELRC -> editedLineByLine
         OnlineExportFormat.TXT -> editedLineByLine.lines()
             .filterNot { it.trim().matches(Regex("""\[(ti|ar|al|by|re|ve|length|offset|kana|la|au|id):.*]""", RegexOption.IGNORE_CASE)) }
             .map { line ->
@@ -634,7 +636,9 @@ fun LyricsEditorBottomSheet(
     }
 
     val detectedFormatLabel = remember(selectedSection, selectedExportFormat, selectedFormat, editedLineByLine, editedSource, editedWordByWord) {
-        if (selectedSection == "online") {
+        if (selectedSection == "default") {
+            "Plain text (.txt)"
+        } else if (selectedSection == "online") {
             when (selectedExportFormat) {
                 OnlineExportFormat.LRC -> "Line-synchronized LRC (.lrc)"
                 OnlineExportFormat.ELRC -> "Enhanced LRC (.elrc)"

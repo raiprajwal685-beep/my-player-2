@@ -521,6 +521,7 @@ private fun WordByWordLyricLineItem(
     // Word timing is represented by a discrete active-word index. Avoid per-word
     // frame animations: they continuously invalidate text layout while playback runs.
 
+    val lyricColorScheme = MaterialTheme.colorScheme
     val annotatedText = remember(
         line.words,
         activeWordIndex,
@@ -529,7 +530,7 @@ private fun WordByWordLyricLineItem(
         textColor,
         lyricBold,
         line.voiceTag,
-        MaterialTheme.colorScheme
+        lyricColorScheme
     ) {
         buildAnnotatedString {
         line.words.forEachIndexed { wordIndex, word ->
@@ -539,15 +540,15 @@ private fun WordByWordLyricLineItem(
             val isVoice3 = line.voiceTag in listOf("v3", "voice3", "group")
 
             val baseColor = when {
-                isVoice2 -> activeColor ?: MaterialTheme.colorScheme.secondary
-                isVoice3 -> activeColor ?: MaterialTheme.colorScheme.tertiary
-                else -> activeColor ?: MaterialTheme.colorScheme.primary
+                isVoice2 -> activeColor ?: lyricColorScheme.secondary
+                isVoice3 -> activeColor ?: lyricColorScheme.tertiary
+                else -> activeColor ?: lyricColorScheme.primary
             }
 
             val inactiveWordColor = when {
                 isVoice2 -> if (isCurrentLine) baseColor.copy(alpha = 0.5f) else baseColor
                 isVoice3 -> if (isCurrentLine) baseColor.copy(alpha = 0.5f) else baseColor
-                else -> if (isCurrentLine) baseColor.copy(alpha = 0.5f) else (textColor ?: MaterialTheme.colorScheme.onSurface)
+                else -> if (isCurrentLine) baseColor.copy(alpha = 0.5f) else (textColor ?: lyricColorScheme.onSurface)
             }
 
             val isWordPassed = isCurrentLine && wordIndex < activeWordIndex

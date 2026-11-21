@@ -453,13 +453,14 @@ fun LyricsEditorBottomSheet(
         )
         
         if (isWordByWordJson) {
-            // Keep the original document in Source, but normalize supported JSON schemas
-            // into the app's canonical word-by-word format for rendering and embedding.
+            // JSON word timings belong in Embedded, never in the plain-text Default editor.
             editedWordByWord = RhythmLyricsParser.toWordByWordJson(parsedWordByWord)
-            editedSource = loadedLyrics
+            editedSource = parsedWordByWord.joinToString("\\n") { line -> line.words.joinToString(" ") { it.text } }
             editedLineByLine = RhythmLyricsParser.toLRCFormat(parsedWordByWord)
+            selectedSection = "embedded"
             selectedFormat = LyricFormat.WORD_BY_WORD
         } else if (isTtml) {
+            selectedSection = "embedded"
             val parsedLines = RhythmLyricsParser.parseTtmlLyrics(loadedLyrics)
             if (parsedLines.isNotEmpty()) {
                 val wordByWordJson = Gson().toJson(parsedLines)
@@ -484,6 +485,7 @@ fun LyricsEditorBottomSheet(
                 selectedFormat = LyricFormat.LINE_BY_LINE
             }
         } else if (isLrc) {
+            selectedSection = "online"
             val hasWordTimestamps = chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(loadedLyrics)
             if (hasWordTimestamps) {
                 val parsedWordByWordLines = try {
@@ -511,8 +513,9 @@ fun LyricsEditorBottomSheet(
                 selectedFormat = LyricFormat.LINE_BY_LINE
             }
         } else {
+            selectedSection = "default"
             editedSource = loadedLyrics
-            editedLineByLine = loadedLyrics
+            editedLineByLine = ""
             editedWordByWord = ""
             selectedFormat = LyricFormat.SOURCE
         }

@@ -502,55 +502,19 @@ private fun WordByWordLyricLineItem(
     activeColor: Color? = null,
     subtitleColor: Color? = null
 ) {
-    val scale by animateFloatAsState(
-        targetValue = when {
-            isCurrentLine -> 1.08f
-            isUpcomingLine && linesAhead == 1 -> 1.02f
-            else -> 1f
-        },
-        animationSpec = if (noAnimation) snap() else spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessVeryLow
-        ),
-        label = "lineScale"
-    )
-
-    val opacity by animateFloatAsState(
-        targetValue = when {
-            isCurrentLine -> 1f
-            distanceFromCurrent == 1 -> 0.75f
-            distanceFromCurrent == 2 -> 0.55f
-            distanceFromCurrent == 3 -> 0.40f
-            distanceFromCurrent == 4 -> 0.30f
-            else -> 0.22f
-        },
-        animationSpec = if (noAnimation) snap() else spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "lineOpacity"
-    )
-
-    val animatedTranslationY by animateFloatAsState(
-        targetValue = when {
-            isUpcomingLine && linesAhead <= 3 -> (linesAhead * 6f)
-            else -> 0f
-        },
-        animationSpec = if (noAnimation) snap() else spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessVeryLow
-        ),
-        label = "lineTranslation"
-    )
-
-    val translationAlpha by animateFloatAsState(
-        targetValue = if (isCurrentLine) 0.95f else 0.72f,
-        animationSpec = if (noAnimation) snap() else spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "translationAlpha"
-    )
+    // Keep line styling discrete as well; animated scale/alpha/translation
+    // effects were creating extra work on every playback-time update.
+    val scale = if (isCurrentLine) 1.08f else 1f
+    val opacity = when {
+        isCurrentLine -> 1f
+        distanceFromCurrent == 1 -> 0.75f
+        distanceFromCurrent == 2 -> 0.55f
+        distanceFromCurrent == 3 -> 0.40f
+        distanceFromCurrent == 4 -> 0.30f
+        else -> 0.22f
+    }
+    val animatedTranslationY = 0f
+    val translationAlpha = if (isCurrentLine) 0.95f else 0.72f
 
     val isWordTimed = remember(line) {
         RhythmLyricsParser.isLineWordTimed(line)

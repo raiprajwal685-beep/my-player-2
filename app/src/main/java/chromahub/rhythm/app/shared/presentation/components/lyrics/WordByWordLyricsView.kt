@@ -523,7 +523,17 @@ private fun WordByWordLyricLineItem(
     // Word timing is represented by a discrete active-word index. Avoid per-word
     // frame animations: they continuously invalidate text layout while playback runs.
 
-    val annotatedText = buildAnnotatedString {
+    val annotatedText = remember(
+        line.words,
+        activeWordIndex,
+        isCurrentLine,
+        activeColor,
+        textColor,
+        lyricBold,
+        line.voiceTag,
+        MaterialTheme.colorScheme
+    ) {
+        buildAnnotatedString {
         line.words.forEachIndexed { wordIndex, word ->
             val isWordActive = isCurrentLine && wordIndex == activeWordIndex
             
@@ -567,6 +577,7 @@ private fun WordByWordLyricLineItem(
                 }
                 append(word.text)
             }
+        }
         }
     }
 

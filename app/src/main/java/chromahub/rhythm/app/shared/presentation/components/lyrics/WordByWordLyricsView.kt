@@ -556,39 +556,8 @@ private fun WordByWordLyricLineItem(
         RhythmLyricsParser.isLineWordTimed(line)
     }
 
-    val activeWord = if (isCurrentLine) line.words.getOrNull(activeWordIndex) else null
-    val duration = remember(activeWord) {
-        activeWord?.let { (it.endtime - it.timestamp).toInt() } ?: 0
-    }
-    
-    val animatedProgress = remember(activeWord) { Animatable(0f) }
-    LaunchedEffect(activeWord) {
-        if (duration > 0 && !noAnimation && isWordTimed) {
-            animatedProgress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = duration, easing = LinearEasing)
-            )
-        } else {
-            animatedProgress.snapTo(1f)
-        }
-    }
-
-    var textLayoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
-    
-    val wordRanges = remember(line.words) {
-        val ranges = mutableListOf<IntRange>()
-        var currentPos = 0
-        line.words.forEachIndexed { index, word ->
-            if (index > 0 && !word.isPart) {
-                currentPos += 1 // Space
-            }
-            val start = currentPos
-            val end = currentPos + word.text.length
-            ranges.add(start..end)
-            currentPos = end
-        }
-        ranges
-    }
+    // Word timing is represented by a discrete active-word index. Avoid per-word
+    // frame animations: they continuously invalidate text layout while playback runs.
 
     val annotatedText = buildAnnotatedString {
         line.words.forEachIndexed { wordIndex, word ->
@@ -612,36 +581,11 @@ private fun WordByWordLyricLineItem(
             val isWordPassed = isCurrentLine && wordIndex < activeWordIndex
 
             val style = if (isWordActive) {
-                val range = wordRanges.getOrNull(wordIndex)
-                val layout = textLayoutResult
-                val sweepProgress = animatedProgress.value
-                if (isWordTimed && range != null && layout != null && !noAnimation && sweepProgress < 1f) {
-                    val startChar = range.first
-                    val endChar = (range.last).coerceAtMost(layout.layoutInput.text.length - 1)
-                    val startRect = layout.getBoundingBox(startChar)
-                    val endRect = layout.getBoundingBox(endChar)
-                    
-                    val left = startRect.left
-                    val right = endRect.right
-                    
-                    val activeBrush = Brush.linearGradient(
-                        colorStops = arrayOf(
-                            (sweepProgress - 0.15f).coerceIn(0f, 1f) to baseColor,
-                            (sweepProgress + 0.15f).coerceIn(0f, 1f) to inactiveWordColor
-                        ),
-                        start = Offset(left, 0f),
-                        end = Offset(right, 0f)
-                    )
-                    SpanStyle(
-                        brush = activeBrush,
-                        fontWeight = if (lyricBold) FontWeight.Black else FontWeight.Bold
-                    )
-                } else {
-                    SpanStyle(
-                        color = baseColor,
-                        fontWeight = if (lyricBold) FontWeight.Black else FontWeight.Bold
-                    )
-                }
+                // Static highlight only. No karaoke sweep, scaling, or per-frame animation.
+                SpanStyle(
+                    color = baseColor,
+                    fontWeight = if (lyricBold) FontWeight.Black else FontWeight.Bold
+                )
             } else {
                 SpanStyle(
                     color = if (isWordPassed || (!isWordTimed && isCurrentLine)) baseColor else inactiveWordColor,
@@ -692,7 +636,6 @@ private fun WordByWordLyricLineItem(
     ) {
         Text(
             text = annotatedText,
-            onTextLayout = { textLayoutResult = it },
             style = MaterialTheme.typography.headlineSmall.copy(
                 fontSize = MaterialTheme.typography.headlineSmall.fontSize * textSizeMultiplier,
                 lineHeight = MaterialTheme.typography.headlineSmall.lineHeight * 1.4f * textSizeMultiplier

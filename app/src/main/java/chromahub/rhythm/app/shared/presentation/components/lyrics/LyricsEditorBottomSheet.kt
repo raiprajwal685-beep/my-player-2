@@ -207,7 +207,6 @@ fun LyricsEditorBottomSheet(
                     ""
                 }
             }
-            ?: lyricsData?.plainLyrics?.takeIf { it.isNotBlank() }
             ?: ""
     }
     
@@ -236,14 +235,14 @@ fun LyricsEditorBottomSheet(
     fun onlineExportContent(): String = when (selectedExportFormat) {
         OnlineExportFormat.LRC, OnlineExportFormat.ELRC -> editedLineByLine
         OnlineExportFormat.TXT -> editedLineByLine.lines()
-            .filterNot { it.trim().matches(Regex("""\\[(ti|ar|al|by|re|ve|length|offset|kana|la|au|id):.*]""", RegexOption.IGNORE_CASE)) }
+            .filterNot { it.trim().matches(Regex("""\[(ti|ar|al|by|re|ve|length|offset|kana|la|au|id):.*]""", RegexOption.IGNORE_CASE)) }
             .map { line ->
-                line.replace(Regex("""\\[\\d{1,2}:\\d{2}\\.\\d{2,3}]"""), "")
-                    .replace(Regex("""<\\d{1,2}:\\d{2}\\.\\d{2,3}>"""), "")
+                line.replace(Regex("""\[\d{1,2}:\d{2}\.\d{2,3}]"""), "")
+                    .replace(Regex("""<\d{1,2}:\d{2}\.\d{2,3}>"""), "")
                     .trim()
             }
             .filter { it.isNotBlank() }
-            .joinToString("\\n")
+            .joinToString("\n")
     }
 
     fun onlineExportIsValid(): Boolean = when (selectedExportFormat) {
@@ -413,7 +412,11 @@ fun LyricsEditorBottomSheet(
     val lrcRenameBehavior by appSettings.lrcRenameBehavior.collectAsState()
 
     LaunchedEffect(song?.id, songLyricsPreferences) {
-        selectedSection = song?.id?.let { songLyricsPreferences[it] } ?: "default"
+        selectedSection = when (song?.id?.let { songLyricsPreferences[it] }) {
+            "online" -> "online"
+            "embedded" -> "embedded"
+            else -> "default"
+        }
         selectedFormat = when (selectedSection) {
             "embedded" -> if (editedWordByWord.isNotBlank()) LyricFormat.WORD_BY_WORD else LyricFormat.LINE_BY_LINE
             "online" -> LyricFormat.LINE_BY_LINE

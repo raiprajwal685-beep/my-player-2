@@ -208,8 +208,19 @@ fun WordByWordLyricsView(
     // Find current line index (among lyric lines only) - using adjustedPlaybackTime for sync offset
     val currentLineIndex by remember(adjustedPlaybackTime, visibleLyricsLines) {
         derivedStateOf {
-            val lastIndexAtPlayback = visibleLyricsLines.indexOfLast { line ->
-                adjustedPlaybackTime >= line.lineTimestamp
+            // The playback clock updates frequently. Binary-search the timestamp-sorted
+            // lines instead of scanning the entire lyric document on every clock tick.
+            var low = 0
+            var high = visibleLyricsLines.lastIndex
+            var lastIndexAtPlayback = -1
+            while (low <= high) {
+                val mid = (low + high) ushr 1
+                if (visibleLyricsLines[mid].lineTimestamp <= adjustedPlaybackTime) {
+                    lastIndexAtPlayback = mid
+                    low = mid + 1
+                } else {
+                    high = mid - 1
+                }
             }
 
             if (lastIndexAtPlayback < 0) {
@@ -287,7 +298,7 @@ fun WordByWordLyricsView(
                         targetIndex = targetItemIndex.coerceIn(0, lyricsItems.lastIndex),
                         scrollOffset = -offset,
                         lastIndex = lyricsItems.lastIndex,
-                        noAnimation = lyricNoAnimationVal
+                        noAnimation = lyricNoAnimationVal || listState.isScrollInProgress
                     )
                 }
             }
@@ -389,7 +400,6 @@ fun WordByWordLyricsView(
                             linesAhead = linesAhead,
                             distanceFromCurrent = distanceFromCurrent,
                             activeWordIndex = activeWordIndex,
-                            adjustedPlaybackTime = adjustedPlaybackTime,
                             textSizeMultiplier = textSizeMultiplier,
                             textAlignment = textAlignment,
                             showTranslation = showTranslation,
@@ -478,7 +488,6 @@ private fun WordByWordLyricLineItem(
     linesAhead: Int,
     distanceFromCurrent: Int,
     activeWordIndex: Int,
-    adjustedPlaybackTime: Long,
     textSizeMultiplier: Float,
     textAlignment: TextAlign,
     showTranslation: Boolean,
@@ -491,95 +500,39 @@ private fun WordByWordLyricLineItem(
     activeColor: Color? = null,
     subtitleColor: Color? = null
 ) {
-    val scale by animateFloatAsState(
-        targetValue = when {
-            isCurrentLine -> 1.08f
-            isUpcomingLine && linesAhead == 1 -> 1.02f
-            else -> 1f
-        },
-        animationSpec = if (noAnimation) snap() else spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessVeryLow
-        ),
-        label = "lineScale"
-    )
-
-    val opacity by animateFloatAsState(
-        targetValue = when {
-            isCurrentLine -> 1f
-            distanceFromCurrent == 1 -> 0.75f
-            distanceFromCurrent == 2 -> 0.55f
-            distanceFromCurrent == 3 -> 0.40f
-            distanceFromCurrent == 4 -> 0.30f
-            else -> 0.22f
-        },
-        animationSpec = if (noAnimation) snap() else spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessLow
-        ),
-        label = "lineOpacity"
-    )
-
-    val animatedTranslationY by animateFloatAsState(
-        targetValue = when {
-            isUpcomingLine && linesAhead <= 3 -> (linesAhead * 6f)
-            else -> 0f
-        },
-        animationSpec = if (noAnimation) snap() else spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessVeryLow
-        ),
-        label = "lineTranslation"
-    )
-
-    val translationAlpha by animateFloatAsState(
-        targetValue = if (isCurrentLine) 0.95f else 0.72f,
-        animationSpec = if (noAnimation) snap() else spring(
-            dampingRatio = Spring.DampingRatioNoBouncy,
-            stiffness = Spring.StiffnessMediumLow
-        ),
-        label = "translationAlpha"
-    )
+    // Keep line styling discrete as well; animated scale/alpha/translation
+    // effects were creating extra work on every playback-time update.
+    val scale = if (isCurrentLine) 1.08f else 1f
+    val opacity = when {
+        isCurrentLine -> 1f
+        distanceFromCurrent == 1 -> 0.75f
+        distanceFromCurrent == 2 -> 0.55f
+        distanceFromCurrent == 3 -> 0.40f
+        distanceFromCurrent == 4 -> 0.30f
+        else -> 0.22f
+    }
+    val animatedTranslationY = 0f
+    val translationAlpha = if (isCurrentLine) 0.95f else 0.72f
 
     val isWordTimed = remember(line) {
         RhythmLyricsParser.isLineWordTimed(line)
     }
 
-    val activeWord = if (isCurrentLine) line.words.getOrNull(activeWordIndex) else null
-    val duration = remember(activeWord) {
-        activeWord?.let { (it.endtime - it.timestamp).toInt() } ?: 0
-    }
-    
-    val animatedProgress = remember(activeWord) { Animatable(0f) }
-    LaunchedEffect(activeWord) {
-        if (duration > 0 && !noAnimation && isWordTimed) {
-            animatedProgress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = duration, easing = LinearEasing)
-            )
-        } else {
-            animatedProgress.snapTo(1f)
-        }
-    }
+    // Word timing is represented by a discrete active-word index. Avoid per-word
+    // frame animations: they continuously invalidate text layout while playback runs.
 
-    var textLayoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
-    
-    val wordRanges = remember(line.words) {
-        val ranges = mutableListOf<IntRange>()
-        var currentPos = 0
-        line.words.forEachIndexed { index, word ->
-            if (index > 0 && !word.isPart) {
-                currentPos += 1 // Space
-            }
-            val start = currentPos
-            val end = currentPos + word.text.length
-            ranges.add(start..end)
-            currentPos = end
-        }
-        ranges
-    }
-
-    val annotatedText = buildAnnotatedString {
+    val lyricColorScheme = MaterialTheme.colorScheme
+    val annotatedText = remember(
+        line.words,
+        activeWordIndex,
+        isCurrentLine,
+        activeColor,
+        textColor,
+        lyricBold,
+        line.voiceTag,
+        lyricColorScheme
+    ) {
+        buildAnnotatedString {
         line.words.forEachIndexed { wordIndex, word ->
             val isWordActive = isCurrentLine && wordIndex == activeWordIndex
             
@@ -587,50 +540,25 @@ private fun WordByWordLyricLineItem(
             val isVoice3 = line.voiceTag in listOf("v3", "voice3", "group")
 
             val baseColor = when {
-                isVoice2 -> activeColor ?: MaterialTheme.colorScheme.secondary
-                isVoice3 -> activeColor ?: MaterialTheme.colorScheme.tertiary
-                else -> activeColor ?: MaterialTheme.colorScheme.primary
+                isVoice2 -> activeColor ?: lyricColorScheme.secondary
+                isVoice3 -> activeColor ?: lyricColorScheme.tertiary
+                else -> activeColor ?: lyricColorScheme.primary
             }
 
             val inactiveWordColor = when {
                 isVoice2 -> if (isCurrentLine) baseColor.copy(alpha = 0.5f) else baseColor
                 isVoice3 -> if (isCurrentLine) baseColor.copy(alpha = 0.5f) else baseColor
-                else -> if (isCurrentLine) baseColor.copy(alpha = 0.5f) else (textColor ?: MaterialTheme.colorScheme.onSurface)
+                else -> if (isCurrentLine) baseColor.copy(alpha = 0.5f) else (textColor ?: lyricColorScheme.onSurface)
             }
 
             val isWordPassed = isCurrentLine && wordIndex < activeWordIndex
 
             val style = if (isWordActive) {
-                val range = wordRanges.getOrNull(wordIndex)
-                val layout = textLayoutResult
-                val sweepProgress = animatedProgress.value
-                if (isWordTimed && range != null && layout != null && !noAnimation && sweepProgress < 1f) {
-                    val startChar = range.first
-                    val endChar = (range.last).coerceAtMost(layout.layoutInput.text.length - 1)
-                    val startRect = layout.getBoundingBox(startChar)
-                    val endRect = layout.getBoundingBox(endChar)
-                    
-                    val left = startRect.left
-                    val right = endRect.right
-                    
-                    val activeBrush = Brush.linearGradient(
-                        colorStops = arrayOf(
-                            (sweepProgress - 0.15f).coerceIn(0f, 1f) to baseColor,
-                            (sweepProgress + 0.15f).coerceIn(0f, 1f) to inactiveWordColor
-                        ),
-                        start = Offset(left, 0f),
-                        end = Offset(right, 0f)
-                    )
-                    SpanStyle(
-                        brush = activeBrush,
-                        fontWeight = if (lyricBold) FontWeight.Black else FontWeight.Bold
-                    )
-                } else {
-                    SpanStyle(
-                        color = baseColor,
-                        fontWeight = if (lyricBold) FontWeight.Black else FontWeight.Bold
-                    )
-                }
+                // Static highlight only. No karaoke sweep, scaling, or per-frame animation.
+                SpanStyle(
+                    color = baseColor,
+                    fontWeight = if (lyricBold) FontWeight.Black else FontWeight.Bold
+                )
             } else {
                 SpanStyle(
                     color = if (isWordPassed || (!isWordTimed && isCurrentLine)) baseColor else inactiveWordColor,
@@ -648,6 +576,7 @@ private fun WordByWordLyricLineItem(
                 }
                 append(word.text)
             }
+        }
         }
     }
 
@@ -681,7 +610,6 @@ private fun WordByWordLyricLineItem(
     ) {
         Text(
             text = annotatedText,
-            onTextLayout = { textLayoutResult = it },
             style = MaterialTheme.typography.headlineSmall.copy(
                 fontSize = MaterialTheme.typography.headlineSmall.fontSize * textSizeMultiplier,
                 lineHeight = MaterialTheme.typography.headlineSmall.lineHeight * 1.4f * textSizeMultiplier

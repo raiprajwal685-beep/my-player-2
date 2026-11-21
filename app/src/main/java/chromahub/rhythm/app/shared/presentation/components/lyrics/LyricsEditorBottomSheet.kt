@@ -112,6 +112,8 @@ enum class LyricFormat {
     WORD_BY_WORD
 }
 
+private enum class OnlineExportFormat { LRC, ELRC, TXT }
+
 data class SaveLyricsInput(
     val fileName: String,
     val mimeType: String,
@@ -187,19 +189,13 @@ fun LyricsEditorBottomSheet(
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     
-    var selectedFormat by remember(lyricsData) {
-        mutableStateOf(
-            if (lyricsData?.wordByWordLyrics?.isNotBlank() == true) LyricFormat.WORD_BY_WORD
-            else if (lyricsData?.syncedLyrics?.isNotBlank() == true) LyricFormat.LINE_BY_LINE
-            else LyricFormat.SOURCE
-        )
-    }
+    // The top-level section controls which lyric representation is being edited.
+    var selectedSection by remember(song?.id) { mutableStateOf("default") }
+    var selectedFormat by remember(song?.id) { mutableStateOf(LyricFormat.SOURCE) }
+    var selectedExportFormat by remember(song?.id) { mutableStateOf(OnlineExportFormat.LRC) }
     
     val sourceForm = remember(lyricsData) {
-        lyricsData?.wordByWordLyrics?.takeIf { it.isNotBlank() }
-            ?: lyricsData?.syncedLyrics?.takeIf { it.isNotBlank() }
-            ?: lyricsData?.plainLyrics?.takeIf { it.isNotBlank() }
-            ?: ""
+        lyricsData?.plainLyrics?.takeIf { it.isNotBlank() } ?: ""
     }
     
     val lineByLineForm = remember(lyricsData) {
@@ -211,7 +207,6 @@ fun LyricsEditorBottomSheet(
                     ""
                 }
             }
-            ?: lyricsData?.plainLyrics?.takeIf { it.isNotBlank() }
             ?: ""
     }
     
@@ -235,6 +230,27 @@ fun LyricsEditorBottomSheet(
             LyricFormat.LINE_BY_LINE -> editedLineByLine = newText
             LyricFormat.WORD_BY_WORD -> editedWordByWord = newText
         }
+    }
+
+    fun onlineExportContent(): String = when (selectedExportFormat) {
+        OnlineExportFormat.LRC -> editedLineByLine.lines()
+            .joinToString("\n") { line -> line.replace(Regex("""<\d{1,2}:\d{2}\.\d{2,3}>"""), "") }
+        OnlineExportFormat.ELRC -> editedLineByLine
+        OnlineExportFormat.TXT -> editedLineByLine.lines()
+            .filterNot { it.trim().matches(Regex("""\[(ti|ar|al|by|re|ve|length|offset|kana|la|au|id):.*]""", RegexOption.IGNORE_CASE)) }
+            .map { line ->
+                line.replace(Regex("""\[\d{1,2}:\d{2}\.\d{2,3}]"""), "")
+                    .replace(Regex("""<\d{1,2}:\d{2}\.\d{2,3}>"""), "")
+                    .trim()
+            }
+            .filter { it.isNotBlank() }
+            .joinToString("\n")
+    }
+
+    fun onlineExportIsValid(): Boolean = when (selectedExportFormat) {
+        OnlineExportFormat.LRC, OnlineExportFormat.TXT -> editedLineByLine.isNotBlank()
+        OnlineExportFormat.ELRC -> editedLineByLine.isNotBlank() &&
+            chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine)
     }
     
     var timeOffset by remember { mutableIntStateOf(initialTimeOffset) }
@@ -397,6 +413,19 @@ fun LyricsEditorBottomSheet(
     val songCustomLrcFiles by appSettings.songCustomLrcFiles.collectAsState()
     val lrcRenameBehavior by appSettings.lrcRenameBehavior.collectAsState()
 
+    LaunchedEffect(song?.id, songLyricsPreferences) {
+        selectedSection = when (song?.id?.let { songLyricsPreferences[it] }) {
+            "online" -> "online"
+            "embedded" -> "embedded"
+            else -> "default"
+        }
+        selectedFormat = when (selectedSection) {
+            "embedded" -> if (editedWordByWord.isNotBlank()) LyricFormat.WORD_BY_WORD else LyricFormat.LINE_BY_LINE
+            "online" -> LyricFormat.LINE_BY_LINE
+            else -> LyricFormat.SOURCE
+        }
+    }
+
     var showRenameDialog by remember { mutableStateOf(false) }
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var pendingFileName by remember { mutableStateOf("") }
@@ -407,9 +436,14 @@ fun LyricsEditorBottomSheet(
     fun applyLoadedLyrics(loadedLyrics: String) {
         val loadedTrimmed = loadedLyrics.trim()
         
-        val isWordByWordJson = (loadedTrimmed.startsWith("[") || loadedTrimmed.startsWith("{")) && 
-            (loadedTrimmed.contains("\"timestamp\"") || loadedTrimmed.contains("\"words\""))
-            
+        val parsedWordByWord = if (loadedTrimmed.startsWith("[") || loadedTrimmed.startsWith("{")) {
+            runCatching { RhythmLyricsParser.parseWordByWordLyrics(loadedLyrics) }
+                .getOrDefault(emptyList())
+        } else {
+            emptyList()
+        }
+        val isWordByWordJson = parsedWordByWord.isNotEmpty()
+
         val isLrc = loadedLyrics.contains(Regex("\\[\\d{2}:\\d{2}\\.\\d{2,3}]"))
 
         val isTtml = loadedTrimmed.startsWith("<") && (
@@ -421,16 +455,14 @@ fun LyricsEditorBottomSheet(
         )
         
         if (isWordByWordJson) {
-            editedWordByWord = loadedLyrics
-            editedSource = loadedLyrics
-            try {
-                val parsed = RhythmLyricsParser.parseWordByWordLyrics(loadedLyrics)
-                editedLineByLine = RhythmLyricsParser.toLRCFormat(parsed)
-            } catch (_: Exception) {
-                editedLineByLine = ""
-            }
+            // JSON word timings belong in Embedded, never in the plain-text Default editor.
+            editedWordByWord = RhythmLyricsParser.toWordByWordJson(parsedWordByWord)
+            editedSource = parsedWordByWord.joinToString("\n") { line -> line.words.joinToString(" ") { it.text } }
+            editedLineByLine = RhythmLyricsParser.toLRCFormat(parsedWordByWord)
+            selectedSection = "embedded"
             selectedFormat = LyricFormat.WORD_BY_WORD
         } else if (isTtml) {
+            selectedSection = "embedded"
             val parsedLines = RhythmLyricsParser.parseTtmlLyrics(loadedLyrics)
             if (parsedLines.isNotEmpty()) {
                 val wordByWordJson = Gson().toJson(parsedLines)
@@ -455,6 +487,7 @@ fun LyricsEditorBottomSheet(
                 selectedFormat = LyricFormat.LINE_BY_LINE
             }
         } else if (isLrc) {
+            selectedSection = "online"
             val hasWordTimestamps = chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(loadedLyrics)
             if (hasWordTimestamps) {
                 val parsedWordByWordLines = try {
@@ -468,7 +501,7 @@ fun LyricsEditorBottomSheet(
                     editedWordByWord = if (hasWordTiming) wordByWordJson else ""
                     editedLineByLine = loadedLyrics
                     editedSource = loadedLyrics
-                    selectedFormat = if (hasWordTiming) LyricFormat.WORD_BY_WORD else LyricFormat.LINE_BY_LINE
+                    selectedFormat = LyricFormat.LINE_BY_LINE
                 } else {
                     editedLineByLine = loadedLyrics
                     editedSource = loadedLyrics
@@ -482,8 +515,9 @@ fun LyricsEditorBottomSheet(
                 selectedFormat = LyricFormat.LINE_BY_LINE
             }
         } else {
+            selectedSection = "default"
             editedSource = loadedLyrics
-            editedLineByLine = loadedLyrics
+            editedLineByLine = ""
             editedWordByWord = ""
             selectedFormat = LyricFormat.SOURCE
         }
@@ -583,22 +617,34 @@ fun LyricsEditorBottomSheet(
             .takeIf { it.isNotEmpty() } ?: "lyrics"  // Fallback to "lyrics" if empty
     }
 
-    val defaultLyricsFileName = remember(song, sanitizedTitle, selectedFormat, editedSource, editedLineByLine) {
+    val defaultLyricsFileName = remember(song, sanitizedTitle, selectedSection, selectedFormat, selectedExportFormat, editedSource, editedLineByLine) {
         val baseName = if (song != null && !song.path.isNullOrBlank()) {
             File(song.path).nameWithoutExtension
         } else {
             sanitizedTitle
         }
-        when {
-            selectedFormat == LyricFormat.WORD_BY_WORD -> "$baseName.json"
-            selectedFormat == LyricFormat.LINE_BY_LINE && chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine) -> "$baseName.elrc"
-            selectedFormat == LyricFormat.SOURCE && editedSource.trim().startsWith("<") -> "$baseName.ttml"
-            else -> "$baseName.lrc"
+        when (selectedSection) {
+            "default" -> "$baseName.txt"
+            "online" -> when (selectedExportFormat) {
+                OnlineExportFormat.LRC -> "$baseName.lrc"
+                OnlineExportFormat.ELRC -> "$baseName.elrc"
+                OnlineExportFormat.TXT -> "$baseName.txt"
+            }
+            else -> if (selectedFormat == LyricFormat.WORD_BY_WORD) "$baseName.json"
+                else if (chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine)) "$baseName.elrc" else "$baseName.lrc"
         }
     }
 
-    val detectedFormatLabel = remember(selectedFormat, editedLineByLine, editedSource, editedWordByWord) {
-        when (selectedFormat) {
+    val detectedFormatLabel = remember(selectedSection, selectedExportFormat, selectedFormat, editedLineByLine, editedSource, editedWordByWord) {
+        if (selectedSection == "default") {
+            "Plain text (.txt)"
+        } else if (selectedSection == "online") {
+            when (selectedExportFormat) {
+                OnlineExportFormat.LRC -> "Line-synchronized LRC (.lrc)"
+                OnlineExportFormat.ELRC -> "Enhanced LRC (.elrc)"
+                OnlineExportFormat.TXT -> "Plain text (.txt)"
+            }
+        } else when (selectedFormat) {
             LyricFormat.WORD_BY_WORD -> "Word-by-Word JSON (.json)"
             LyricFormat.LINE_BY_LINE -> {
                 if (chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine)) {
@@ -623,15 +669,21 @@ fun LyricsEditorBottomSheet(
     ) { uri: Uri? ->
         uri?.let {
             try {
+                val contentToSave = if (selectedSection == "online") onlineExportContent() else editedLyrics
+                if (selectedSection == "online" && !onlineExportIsValid()) {
+                    Toast.makeText(context, "ELRC export requires word-level timestamps", Toast.LENGTH_LONG).show()
+                    return@let
+                }
                 context.contentResolver.openOutputStream(it)?.use { outputStream ->
-                    outputStream.write(editedLyrics.toByteArray())
+                    outputStream.write(contentToSave.toByteArray())
                     outputStream.flush()
                 }
 
                 maybeRenameLyricsDocument(it, defaultLyricsFileName)
 
                 Toast.makeText(context, R.string.lyrics_saved_success, Toast.LENGTH_SHORT).show()
-                onSave(editedLyrics, timeOffset, selectedFormat.name)
+                val savedFormat = if (selectedSection == "online") selectedExportFormat.name else selectedFormat.name
+                onSave(contentToSave, timeOffset, savedFormat)
                 onDismiss()
             } catch (e: Exception) {
                 Log.e("LyricsEditor", "Error saving lyrics file", e)
@@ -689,14 +741,12 @@ fun LyricsEditorBottomSheet(
                         options = listOf(
                             RhythmToggleOption(text = stringResource(R.string.settings_default)),
                             RhythmToggleOption(text = "Online"),
-                            RhythmToggleOption(text = "Embedded"),
-                            RhythmToggleOption(text = "LRC")
+                            RhythmToggleOption(text = "Embedded")
                         ),
                         selectedIndices = setOf(
-                            when (currentPref) {
+                            when (selectedSection) {
                                 "online" -> 1
                                 "embedded" -> 2
-                                "lrc" -> 3
                                 else -> 0
                             }
                         ),
@@ -705,8 +755,13 @@ fun LyricsEditorBottomSheet(
                             val newPref = when (index) {
                                 1 -> "online"
                                 2 -> "embedded"
-                                3 -> "lrc"
                                 else -> null
+                            }
+                            selectedSection = newPref ?: "default"
+                            selectedFormat = when (selectedSection) {
+                                "online" -> LyricFormat.LINE_BY_LINE
+                                "embedded" -> if (editedWordByWord.isNotBlank()) LyricFormat.WORD_BY_WORD else LyricFormat.LINE_BY_LINE
+                                else -> LyricFormat.SOURCE
                             }
                             appSettings.setSongLyricsPreference(songId, newPref)
                             onRefresh()
@@ -761,70 +816,85 @@ fun LyricsEditorBottomSheet(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // Format Selector Button Group like Theme Switcher
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-            ) {
+            if (selectedSection == "online") {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                    Text(
+                        text = "Export fetched lyrics as",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
                     RhythmToggleButtonGroup(
                         options = listOf(
-                            RhythmToggleOption(text = stringResource(R.string.lyrics_source)),
-                            RhythmToggleOption(text = stringResource(R.string.lyrics_line_by_line)),
-                            RhythmToggleOption(text = stringResource(R.string.lyrics_word_by_word))
+                            RhythmToggleOption(text = ".lrc"),
+                            RhythmToggleOption(text = ".elrc"),
+                            RhythmToggleOption(text = ".txt")
                         ),
                         selectedIndices = setOf(
-                            when (selectedFormat) {
-                                LyricFormat.SOURCE -> 0
-                                LyricFormat.LINE_BY_LINE -> 1
-                                LyricFormat.WORD_BY_WORD -> 2
+                            when (selectedExportFormat) {
+                                OnlineExportFormat.LRC -> 0
+                                OnlineExportFormat.ELRC -> 1
+                                OnlineExportFormat.TXT -> 2
                             }
                         ),
                         onToggle = { index ->
                             HapticUtils.performHapticFeedback(context, haptic, HapticType.LIGHT)
-                            val targetFormat = when (index) {
-                                0 -> LyricFormat.SOURCE
-                                1 -> LyricFormat.LINE_BY_LINE
-                                else -> LyricFormat.WORD_BY_WORD
+                            selectedExportFormat = when (index) {
+                                1 -> OnlineExportFormat.ELRC
+                                2 -> OnlineExportFormat.TXT
+                                else -> OnlineExportFormat.LRC
                             }
-                            // Auto-translate between formats when switching
-                            if (targetFormat == LyricFormat.LINE_BY_LINE && editedLineByLine.isBlank() && editedWordByWord.isNotBlank()) {
-                                try {
-                                    val parsed = RhythmLyricsParser.parseWordByWordLyrics(editedWordByWord)
-                                    if (parsed.isNotEmpty()) {
-                                        editedLineByLine = RhythmLyricsParser.toEnhancedLRCFormat(parsed)
-                                    }
-                                } catch (_: Exception) {}
-                            } else if (targetFormat == LyricFormat.WORD_BY_WORD && editedWordByWord.isBlank() && chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine)) {
-                                try {
-                                    val parsed = RhythmLyricsParser.parseEnhancedLRCtoWordByWord(editedLineByLine)
-                                    if (parsed.isNotEmpty()) {
-                                        editedWordByWord = com.google.gson.Gson().toJson(parsed)
-                                    }
-                                } catch (_: Exception) {}
-                            } else if (targetFormat == LyricFormat.SOURCE && editedSource.isBlank()) {
-                                if (editedWordByWord.isNotBlank()) {
-                                    try {
-                                        val parsed = RhythmLyricsParser.parseWordByWordLyrics(editedWordByWord)
-                                        if (parsed.isNotEmpty()) {
-                                            editedSource = RhythmLyricsParser.toTtmlFormat(parsed, song?.title, song?.artist)
-                                        }
-                                    } catch (_: Exception) {}
-                                } else if (editedLineByLine.isNotBlank()) {
-                                    editedSource = editedLineByLine
-                                }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        size = RhythmButtonSize.Medium,
+                        isShowingCheck = false
+                    )
+                    if (selectedExportFormat == OnlineExportFormat.ELRC && !chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine)) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "This LRC has line timestamps only. Add word timestamps such as <00:12.34> to each word before exporting valid ELRC.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+
+            if (selectedSection == "embedded") {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)
+                ) {
+                    RhythmToggleButtonGroup(
+                        options = listOf(
+                            RhythmToggleOption(text = stringResource(R.string.lyrics_line_by_line)),
+                            RhythmToggleOption(text = stringResource(R.string.lyrics_word_by_word))
+                        ),
+                        selectedIndices = setOf(if (selectedFormat == LyricFormat.WORD_BY_WORD) 1 else 0),
+                        onToggle = { index ->
+                            HapticUtils.performHapticFeedback(context, haptic, HapticType.LIGHT)
+                            selectedFormat = if (index == 1) LyricFormat.WORD_BY_WORD else LyricFormat.LINE_BY_LINE
+                            if (selectedFormat == LyricFormat.LINE_BY_LINE && editedLineByLine.isBlank() && editedWordByWord.isNotBlank()) {
+                                runCatching { RhythmLyricsParser.toLRCFormat(RhythmLyricsParser.parseWordByWordLyrics(editedWordByWord)) }
+                                    .getOrNull()?.let { editedLineByLine = it }
+                            } else if (selectedFormat == LyricFormat.WORD_BY_WORD && editedWordByWord.isBlank() &&
+                                chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine)) {
+                                runCatching { RhythmLyricsParser.toWordByWordJson(RhythmLyricsParser.parseEnhancedLRCtoWordByWord(editedLineByLine)) }
+                                    .getOrNull()?.let { editedWordByWord = it }
                             }
-                            selectedFormat = targetFormat
                         },
                         modifier = Modifier.fillMaxWidth(),
                         size = RhythmButtonSize.Medium,
                         isShowingCheck = false
                     )
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Timestamp Adjustment Controls
+            // Plain text has no timestamps to adjust.
+            if (selectedSection != "default") {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1059,6 +1129,8 @@ fun LyricsEditorBottomSheet(
                     }
                 }
 
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             Column(
@@ -1075,10 +1147,10 @@ fun LyricsEditorBottomSheet(
                         .fillMaxHeight(),
                     placeholder = {
                         Text(
-                            text = when (selectedFormat) {
-                                LyricFormat.WORD_BY_WORD -> "Enter word-by-word lyrics JSON…"
-                                LyricFormat.LINE_BY_LINE -> "Enter timestamped LRC or Enhanced LRC ([00:12.34]<00:12.34>word)…"
-                                LyricFormat.SOURCE -> "Enter raw TTML XML, LRC, or plain text…"
+                            text = when (selectedSection) {
+                                "default" -> "Enter plain lyrics text…"
+                                "online" -> "Edit fetched line-synchronized LRC…"
+                                else -> if (selectedFormat == LyricFormat.WORD_BY_WORD) "Edit embedded word-by-word lyrics…" else "Edit embedded line-by-line LRC…"
                             },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
@@ -1142,11 +1214,16 @@ fun LyricsEditorBottomSheet(
                             onClick = {
                                 HapticUtils.performHapticFeedback(context, haptic, HapticType.HEAVY)
                                 if (editedLyrics.isNotBlank()) {
+                                    if (selectedSection == "online" && !onlineExportIsValid()) {
+                                        Toast.makeText(context, "ELRC export requires word-level timestamps", Toast.LENGTH_LONG).show()
+                                        return@RhythmButtonWeighted
+                                    }
                                     val mimeType = when {
+                                        selectedSection == "default" -> "text/plain"
+                                        selectedSection == "online" && selectedExportFormat == OnlineExportFormat.TXT -> "text/plain"
+                                        selectedSection == "online" -> "text/x-lrc"
                                         selectedFormat == LyricFormat.WORD_BY_WORD -> "application/json"
-                                        selectedFormat == LyricFormat.LINE_BY_LINE && chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine) -> "text/x-lrc"
-                                        selectedFormat == LyricFormat.SOURCE && editedSource.trim().startsWith("<") -> "application/ttml+xml"
-                                        else -> "application/octet-stream"
+                                        else -> "text/x-lrc"
                                     }
                                     val initialUri = getInitialFolderUri(song?.path)
                                     saveLyricsLauncher.launch(
@@ -1160,14 +1237,14 @@ fun LyricsEditorBottomSheet(
                             },
                             weight = 1f,
                             isLast = true,
-                            enabled = editedLyrics.isNotBlank(),
+                            enabled = editedLyrics.isNotBlank() && (selectedSection != "online" || onlineExportIsValid()),
                             icon = MaterialSymbolIcon("save", filled = true),
                             text = context.getString(R.string.bottomsheet_lyrics_save)
                         )
                     }
 
                     // Embed in File is local-only — streaming songs have no writable file.
-                    if (!isStreamingMode) {
+                    if (!isStreamingMode && selectedSection == "embedded") {
                         Spacer(modifier = Modifier.height(12.dp))
 
                         RhythmGroupedButton(

@@ -740,7 +740,7 @@ fun LyricsEditorBottomSheet(
                             RhythmToggleOption(text = "Embedded")
                         ),
                         selectedIndices = setOf(
-                            when (currentPref) {
+                            when (selectedSection) {
                                 "online" -> 1
                                 "embedded" -> 2
                                 else -> 0

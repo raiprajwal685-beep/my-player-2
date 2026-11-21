@@ -112,6 +112,8 @@ enum class LyricFormat {
     WORD_BY_WORD
 }
 
+private enum class OnlineExportFormat { LRC, ELRC, TXT }
+
 data class SaveLyricsInput(
     val fileName: String,
     val mimeType: String,
@@ -190,6 +192,7 @@ fun LyricsEditorBottomSheet(
     // The top-level section controls which lyric representation is being edited.
     var selectedSection by remember(song?.id) { mutableStateOf("default") }
     var selectedFormat by remember(song?.id) { mutableStateOf(LyricFormat.SOURCE) }
+    var selectedExportFormat by remember(song?.id) { mutableStateOf(OnlineExportFormat.LRC) }
     
     val sourceForm = remember(lyricsData) {
         lyricsData?.plainLyrics?.takeIf { it.isNotBlank() } ?: ""
@@ -228,6 +231,25 @@ fun LyricsEditorBottomSheet(
             LyricFormat.LINE_BY_LINE -> editedLineByLine = newText
             LyricFormat.WORD_BY_WORD -> editedWordByWord = newText
         }
+    }
+
+    fun onlineExportContent(): String = when (selectedExportFormat) {
+        OnlineExportFormat.LRC, OnlineExportFormat.ELRC -> editedLineByLine
+        OnlineExportFormat.TXT -> editedLineByLine.lines()
+            .filterNot { it.trim().matches(Regex("""\\[(ti|ar|al|by|re|ve|length|offset|kana|la|au|id):.*]""", RegexOption.IGNORE_CASE)) }
+            .map { line ->
+                line.replace(Regex("""\\[\\d{1,2}:\\d{2}\\.\\d{2,3}]"""), "")
+                    .replace(Regex("""<\\d{1,2}:\\d{2}\\.\\d{2,3}>"""), "")
+                    .trim()
+            }
+            .filter { it.isNotBlank() }
+            .joinToString("\\n")
+    }
+
+    fun onlineExportIsValid(): Boolean = when (selectedExportFormat) {
+        OnlineExportFormat.LRC, OnlineExportFormat.TXT -> editedLineByLine.isNotBlank()
+        OnlineExportFormat.ELRC -> editedLineByLine.isNotBlank() &&
+            chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine)
     }
     
     var timeOffset by remember { mutableIntStateOf(initialTimeOffset) }
@@ -587,7 +609,7 @@ fun LyricsEditorBottomSheet(
             .takeIf { it.isNotEmpty() } ?: "lyrics"  // Fallback to "lyrics" if empty
     }
 
-    val defaultLyricsFileName = remember(song, sanitizedTitle, selectedFormat, editedSource, editedLineByLine) {
+    val defaultLyricsFileName = remember(song, sanitizedTitle, selectedSection, selectedFormat, selectedExportFormat, editedSource, editedLineByLine) {
         val baseName = if (song != null && !song.path.isNullOrBlank()) {
             File(song.path).nameWithoutExtension
         } else {
@@ -595,14 +617,24 @@ fun LyricsEditorBottomSheet(
         }
         when (selectedSection) {
             "default" -> "$baseName.txt"
-            "online" -> "$baseName.lrc"
+            "online" -> when (selectedExportFormat) {
+                OnlineExportFormat.LRC -> "$baseName.lrc"
+                OnlineExportFormat.ELRC -> "$baseName.elrc"
+                OnlineExportFormat.TXT -> "$baseName.txt"
+            }
             else -> if (selectedFormat == LyricFormat.WORD_BY_WORD) "$baseName.json"
                 else if (chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine)) "$baseName.elrc" else "$baseName.lrc"
         }
     }
 
-    val detectedFormatLabel = remember(selectedFormat, editedLineByLine, editedSource, editedWordByWord) {
-        when (selectedFormat) {
+    val detectedFormatLabel = remember(selectedSection, selectedExportFormat, selectedFormat, editedLineByLine, editedSource, editedWordByWord) {
+        if (selectedSection == "online") {
+            when (selectedExportFormat) {
+                OnlineExportFormat.LRC -> "Line-synchronized LRC (.lrc)"
+                OnlineExportFormat.ELRC -> "Enhanced LRC (.elrc)"
+                OnlineExportFormat.TXT -> "Plain text (.txt)"
+            }
+        } else when (selectedFormat) {
             LyricFormat.WORD_BY_WORD -> "Word-by-Word JSON (.json)"
             LyricFormat.LINE_BY_LINE -> {
                 if (chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine)) {
@@ -627,15 +659,21 @@ fun LyricsEditorBottomSheet(
     ) { uri: Uri? ->
         uri?.let {
             try {
+                val contentToSave = if (selectedSection == "online") onlineExportContent() else editedLyrics
+                if (selectedSection == "online" && !onlineExportIsValid()) {
+                    Toast.makeText(context, "ELRC export requires word-level timestamps", Toast.LENGTH_LONG).show()
+                    return@let
+                }
                 context.contentResolver.openOutputStream(it)?.use { outputStream ->
-                    outputStream.write(editedLyrics.toByteArray())
+                    outputStream.write(contentToSave.toByteArray())
                     outputStream.flush()
                 }
 
                 maybeRenameLyricsDocument(it, defaultLyricsFileName)
 
                 Toast.makeText(context, R.string.lyrics_saved_success, Toast.LENGTH_SHORT).show()
-                onSave(editedLyrics, timeOffset, selectedFormat.name)
+                val savedFormat = if (selectedSection == "online") selectedExportFormat.name else selectedFormat.name
+                onSave(contentToSave, timeOffset, savedFormat)
                 onDismiss()
             } catch (e: Exception) {
                 Log.e("LyricsEditor", "Error saving lyrics file", e)
@@ -766,6 +804,51 @@ fun LyricsEditorBottomSheet(
                     }
                 }
                 Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            if (selectedSection == "online") {
+                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                    Text(
+                        text = "Export fetched lyrics as",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    RhythmToggleButtonGroup(
+                        options = listOf(
+                            RhythmToggleOption(text = ".lrc"),
+                            RhythmToggleOption(text = ".elrc"),
+                            RhythmToggleOption(text = ".txt")
+                        ),
+                        selectedIndices = setOf(
+                            when (selectedExportFormat) {
+                                OnlineExportFormat.LRC -> 0
+                                OnlineExportFormat.ELRC -> 1
+                                OnlineExportFormat.TXT -> 2
+                            }
+                        ),
+                        onToggle = { index ->
+                            HapticUtils.performHapticFeedback(context, haptic, HapticType.LIGHT)
+                            selectedExportFormat = when (index) {
+                                1 -> OnlineExportFormat.ELRC
+                                2 -> OnlineExportFormat.TXT
+                                else -> OnlineExportFormat.LRC
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        size = RhythmButtonSize.Medium,
+                        isShowingCheck = false
+                    )
+                    if (selectedExportFormat == OnlineExportFormat.ELRC && !chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine)) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "This LRC has line timestamps only. Add word timestamps such as <00:12.34> to each word before exporting valid ELRC.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
             }
 
             if (selectedSection == "embedded") {
@@ -1121,11 +1204,16 @@ fun LyricsEditorBottomSheet(
                             onClick = {
                                 HapticUtils.performHapticFeedback(context, haptic, HapticType.HEAVY)
                                 if (editedLyrics.isNotBlank()) {
+                                    if (selectedSection == "online" && !onlineExportIsValid()) {
+                                        Toast.makeText(context, "ELRC export requires word-level timestamps", Toast.LENGTH_LONG).show()
+                                        return@RhythmButtonWeighted
+                                    }
                                     val mimeType = when {
+                                        selectedSection == "default" -> "text/plain"
+                                        selectedSection == "online" && selectedExportFormat == OnlineExportFormat.TXT -> "text/plain"
+                                        selectedSection == "online" -> "text/x-lrc"
                                         selectedFormat == LyricFormat.WORD_BY_WORD -> "application/json"
-                                        selectedFormat == LyricFormat.LINE_BY_LINE && chromahub.rhythm.app.util.LyricsParser.hasWordTimestamps(editedLineByLine) -> "text/x-lrc"
-                                        selectedFormat == LyricFormat.SOURCE && editedSource.trim().startsWith("<") -> "application/ttml+xml"
-                                        else -> "application/octet-stream"
+                                        else -> "text/x-lrc"
                                     }
                                     val initialUri = getInitialFolderUri(song?.path)
                                     saveLyricsLauncher.launch(
@@ -1139,7 +1227,7 @@ fun LyricsEditorBottomSheet(
                             },
                             weight = 1f,
                             isLast = true,
-                            enabled = editedLyrics.isNotBlank(),
+                            enabled = editedLyrics.isNotBlank() && (selectedSection != "online" || onlineExportIsValid()),
                             icon = MaterialSymbolIcon("save", filled = true),
                             text = context.getString(R.string.bottomsheet_lyrics_save)
                         )

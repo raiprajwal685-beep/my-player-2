@@ -455,7 +455,7 @@ fun LyricsEditorBottomSheet(
         if (isWordByWordJson) {
             // JSON word timings belong in Embedded, never in the plain-text Default editor.
             editedWordByWord = RhythmLyricsParser.toWordByWordJson(parsedWordByWord)
-            editedSource = parsedWordByWord.joinToString("\\n") { line -> line.words.joinToString(" ") { it.text } }
+            editedSource = parsedWordByWord.joinToString("\n") { line -> line.words.joinToString(" ") { it.text } }
             editedLineByLine = RhythmLyricsParser.toLRCFormat(parsedWordByWord)
             selectedSection = "embedded"
             selectedFormat = LyricFormat.WORD_BY_WORD
@@ -499,7 +499,7 @@ fun LyricsEditorBottomSheet(
                     editedWordByWord = if (hasWordTiming) wordByWordJson else ""
                     editedLineByLine = loadedLyrics
                     editedSource = loadedLyrics
-                    selectedFormat = if (hasWordTiming) LyricFormat.WORD_BY_WORD else LyricFormat.LINE_BY_LINE
+                    selectedFormat = LyricFormat.LINE_BY_LINE
                 } else {
                     editedLineByLine = loadedLyrics
                     editedSource = loadedLyrics

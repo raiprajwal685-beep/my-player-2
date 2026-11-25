@@ -132,8 +132,12 @@ android {
             }
         }
         debug {
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
+            // Install as a separate app beside the regular Rhythm/My Player build.
+            // A distinct application ID also isolates app data, media sessions,
+            // notifications, and service instances from the production install.
+            applicationIdSuffix = ".debugtest"
+            versionNameSuffix = "-debug-test"
+            resValue("string", "app_name", "Debug Test Player")
             //isMinifyEnabled = false
             //isDebuggable = true
             signingConfig = releaseSigning

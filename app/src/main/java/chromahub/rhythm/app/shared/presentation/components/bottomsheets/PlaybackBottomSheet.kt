@@ -258,6 +258,7 @@ fun PlaybackBottomSheet(
                         musicViewModel.showOutputSwitcherDialog()
                     },
                     onRefreshDevices = onRefreshDevices,
+                    onToggleVolumeMode = { musicViewModel.setUseSystemVolumeMode(!useSystemVolume) },
                     haptics = haptics
                 )
             }
@@ -461,6 +462,7 @@ private fun VolumeAndDeviceCard(
     location: PlaybackLocation?,
     onSwitchDevice: () -> Unit,
     onRefreshDevices: () -> Unit,
+    onToggleVolumeMode: () -> Unit,
     haptics: androidx.compose.ui.hapticfeedback.HapticFeedback,
     modifier: Modifier = Modifier
 ) {
@@ -614,7 +616,7 @@ private fun VolumeAndDeviceCard(
                 RhythmGroupedButton(
                     size = RhythmButtonSize.Small,
                     isFillMaxWidth = false,
-                    modifier = Modifier.widthIn(max = 92.dp)
+                    modifier = Modifier.widthIn(max = 138.dp)
                 ) {
                     RhythmButtonWeighted(
                         onClick = {
@@ -638,6 +640,18 @@ private fun VolumeAndDeviceCard(
                                 .graphicsLayer { rotationZ = refreshRotation }
                         )
                     }
+
+                    RhythmButtonWeighted(
+                        onClick = onToggleVolumeMode,
+                        weight = 1f,
+                        size = RhythmButtonSize.Small,
+                        height = 36.dp,
+                        iconSize = 18.dp,
+                        isFirst = false,
+                        isLast = false,
+                        icon = if (useSystemVolume) MaterialSymbolIcon("volume_up", filled = true) else MaterialSymbolIcon("tune", filled = true),
+                        contentDescription = if (useSystemVolume) "Switch to independent volume" else "Switch to system volume"
+                    )
 
                     RhythmButtonWeighted(
                         onClick = onSwitchDevice,

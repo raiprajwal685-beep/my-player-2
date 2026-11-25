@@ -149,12 +149,6 @@ fun ExpressiveBottomButtonsOrderBottomSheet(
         }
         initiallyHidden.remove("MORE")
 
-        val visiblePins = fullNormalList.filter { it != "MORE" && !initiallyHidden.contains(it) }
-        if (visiblePins.size > AppSettings.MAX_EXPRESSIVE_BOTTOM_PINS_NORMAL) {
-            visiblePins.drop(AppSettings.MAX_EXPRESSIVE_BOTTOM_PINS_NORMAL).forEach {
-                initiallyHidden.add(it)
-            }
-        }
         mutableStateOf(initiallyHidden.toSet())
     }
 
@@ -165,12 +159,6 @@ fun ExpressiveBottomButtonsOrderBottomSheet(
         editableMergeBottomButtons.forEach { btn ->
             if (!activeMergeButtons.contains(btn)) {
                 initiallyHidden.add(btn)
-            }
-        }
-        val visibleButtons = fullMergeList.filterNot { initiallyHidden.contains(it) }
-        if (visibleButtons.size > AppSettings.MAX_EXPRESSIVE_BOTTOM_BUTTONS_MERGE) {
-            visibleButtons.drop(AppSettings.MAX_EXPRESSIVE_BOTTOM_BUTTONS_MERGE).forEach {
-                initiallyHidden.add(it)
             }
         }
         mutableStateOf(initiallyHidden.toSet())
@@ -280,13 +268,12 @@ fun ExpressiveBottomButtonsOrderBottomSheet(
                 } else {
                     activeList.count { !activeHiddenSet.contains(it) }
                 }
-                val maxAllowed = if (isNormalMode) AppSettings.MAX_EXPRESSIVE_BOTTOM_PINS_NORMAL else AppSettings.MAX_EXPRESSIVE_BOTTOM_BUTTONS_MERGE
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.secondaryContainer
                 ) {
                     Text(
-                        text = "$currentPinnedCount / $maxAllowed",
+                        text = currentPinnedCount.toString(),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -441,30 +428,6 @@ fun ExpressiveBottomButtonsOrderBottomSheet(
                                                 Toast.LENGTH_SHORT
                                             ).show()
                                             return@IconButton
-                                        }
-                                        if (isHidden) {
-                                            if (isNormalMode) {
-                                                val currentPinsCount = activeList.count { it != "MORE" && !activeHiddenSet.contains(it) }
-                                                if (currentPinsCount >= AppSettings.MAX_EXPRESSIVE_BOTTOM_PINS_NORMAL) {
-                                                    HapticUtils.performHapticFeedback(context, haptics, HapticType.HEAVY)
-                                                    Toast.makeText(
-                                                        context,
-                                                        context.getString(R.string.expressive_bottom_buttons_max_limit, AppSettings.MAX_EXPRESSIVE_BOTTOM_PINS_NORMAL),
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
-                                                    return@IconButton
-                                                }
-                                            } else {
-                                                if (visibleButtonsCount >= AppSettings.MAX_EXPRESSIVE_BOTTOM_BUTTONS_MERGE) {
-                                                    HapticUtils.performHapticFeedback(context, haptics, HapticType.HEAVY)
-                                                    Toast.makeText(
-                                                        context,
-                                                        context.getString(R.string.expressive_bottom_buttons_max_limit, AppSettings.MAX_EXPRESSIVE_BOTTOM_BUTTONS_MERGE),
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
-                                                    return@IconButton
-                                                }
-                                            }
                                         }
                                         HapticUtils.performHapticFeedback(context, haptics, HapticType.LIGHT)
                                         if (isNormalMode) {
